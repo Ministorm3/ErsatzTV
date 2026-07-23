@@ -7,5 +7,6 @@ public record GetHlsPlaylistByChannelNumber(
     string Host,
     string ChannelNumber,
     string Mode,
-    string AccessToken)
+    string AccessToken,
+    string ExtraQuery = null)
     : IRequest<Either<BaseError, string>>;

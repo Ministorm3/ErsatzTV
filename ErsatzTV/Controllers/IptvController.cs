@@ -51,7 +51,8 @@ public class IptvController : StreamingControllerBase
                     Request.PathBase,
                     mode,
                     Request.Headers.UserAgent,
-                    Request.Query["access_token"]))
+                    Request.Query["access_token"],
+                    Request.Query.CustomParameters().ToQueryString()))
             .Map<ChannelPlaylist, IActionResult>(Ok);
 
     [HttpHead("iptv/xmltv.xml")]
@@ -105,14 +106,19 @@ public class IptvController : StreamingControllerBase
                         mode = "ts";
                         break;
                     default:
-                        return Redirect($"~/iptv/channel/{channelNumber}.m3u8{AccessTokenQuery()}");
+                        return Redirect(
+                            $"~/iptv/channel/{channelNumber}.m3u8{AccessTokenQuery().AppendQuery(Request.Query.CustomParameters().ToQueryString())}");
                 }
             }
         }
 
         FFmpegProcessRequest request = mode switch
         {
-            "ts-legacy" => new GetConcatProcessByChannelNumber(Request.Scheme, Request.Host.ToString(), channelNumber),
+            "ts-legacy" => new GetConcatProcessByChannelNumber(
+                Request.Scheme,
+                Request.Host.ToString(),
+                channelNumber,
+                Request.Query.CustomParameters().ToQueryString()),
             _ => new GetWrappedProcessByChannelNumber(
                 Request.Scheme,
                 Request.Host.ToString(),
@@ -208,7 +214,8 @@ public class IptvController : StreamingControllerBase
                         mode = "segmenter";
                         break;
                     default:
-                        return Redirect($"~/iptv/channel/{channelNumber}.ts{AccessTokenQuery()}");
+                        return Redirect(
+                            $"~/iptv/channel/{channelNumber}.ts{AccessTokenQuery().AppendQuery(Request.Query.CustomParameters().ToQueryString())}");
                 }
             }
         }
@@ -231,7 +238,8 @@ public class IptvController : StreamingControllerBase
                         Request.Scheme,
                         Request.Host.ToString(),
                         Request.PathBase,
-                        AccessTokenQuery())
+                        AccessTokenQuery(),
+                        Request.Query.CustomParameters().ToQueryString())
                     : new StartFFmpegNextSession(
                         channelNumber,
                         mode,
@@ -276,7 +284,8 @@ public class IptvController : StreamingControllerBase
                             Request.Host.ToString(),
                             channelNumber,
                             mode,
-                            Request.Query["access_token"]))
+                            Request.Query["access_token"],
+                            Request.Query.CustomParameters().ToQueryString()))
                     .Map(r => r.Match<IActionResult>(
                         playlist => Content(playlist, "application/vnd.apple.mpegurl"),
                         error => BadRequest(error.Value)));
@@ -315,7 +324,8 @@ public class IptvController : StreamingControllerBase
             TimeSpan.Zero,
             Option<FrameRate>.None,
             IsTroubleshooting: false,
-            Option<int>.None);
+            Option<int>.None,
+            Request.Query.CustomParameters());
 
         Either<BaseError, PlayoutItemProcessModel> result = await _mediator.Send(request);
 

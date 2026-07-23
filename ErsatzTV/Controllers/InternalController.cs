@@ -55,7 +55,12 @@ public class InternalController : StreamingControllerBase
     [HttpGet("ffmpeg/concat/{channelNumber}")]
     public Task<IActionResult> GetConcatPlaylist(string channelNumber, [FromQuery] string mode = "ts-legacy") =>
         _mediator.Send(
-                new GetConcatPlaylistByChannelNumber(Request.Scheme, Request.Host.ToString(), channelNumber, mode))
+                new GetConcatPlaylistByChannelNumber(
+                    Request.Scheme,
+                    Request.Host.ToString(),
+                    channelNumber,
+                    mode,
+                    Request.Query.CustomParameters().ToQueryString()))
             .ToActionResult();
 
     [HttpGet("ffmpeg/stream/{channelNumber}")]
@@ -342,7 +347,8 @@ public class InternalController : StreamingControllerBase
             TimeSpan.Zero,
             Option<FrameRate>.None,
             IsTroubleshooting: false,
-            Option<int>.None);
+            Option<int>.None,
+            Request.Query.CustomParameters());
 
         Either<BaseError, PlayoutItemProcessModel> result = await _mediator.Send(request);
 

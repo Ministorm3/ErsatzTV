@@ -9,6 +9,7 @@ public class ChannelPlaylist
     private readonly string _accessToken;
     private readonly string _baseUrl;
     private readonly List<Channel> _channels;
+    private readonly string _extraQuery;
     private readonly string _host;
     private readonly string _scheme;
     private readonly string _userAgent;
@@ -19,7 +20,8 @@ public class ChannelPlaylist
         string baseUrl,
         List<Channel> channels,
         string userAgent,
-        string accessToken)
+        string accessToken,
+        string extraQuery = null)
     {
         _scheme = scheme;
         _host = host;
@@ -27,6 +29,7 @@ public class ChannelPlaylist
         _channels = channels;
         _userAgent = userAgent;
         _accessToken = accessToken;
+        _extraQuery = extraQuery;
     }
 
     public string ToM3U()
@@ -82,6 +85,11 @@ public class ChannelPlaylist
                 StreamingMode.TransportStreamHybrid => $"ts{accessTokenUri}",
                 _ => $"ts?mode=ts-legacy{accessTokenUriAmp}"
             };
+
+            if (!string.IsNullOrWhiteSpace(_extraQuery))
+            {
+                format += format.Contains('?') ? $"&{_extraQuery}" : $"?{_extraQuery}";
+            }
 
             string vcodec = channel.FFmpegProfile.VideoFormat.ToString().ToLowerInvariant();
             string acodec = channel.FFmpegProfile.AudioFormat.ToString().ToLowerInvariant();

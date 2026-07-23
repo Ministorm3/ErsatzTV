@@ -8,6 +8,7 @@ public record StartFFmpegSession(
     string Scheme,
     string Host,
     string PathBase,
-    string AccessTokenQuery) :
+    string AccessTokenQuery,
+    string ExtraQuery = null) :
     IRequest<Either<BaseError, string>>,
     IFFmpegWorkerRequest;

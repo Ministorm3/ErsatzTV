@@ -74,6 +74,7 @@ public interface IFFmpegProcessService
         Channel channel,
         string scheme,
         string host,
+        string extraQuery,
         CancellationToken cancellationToken);
 
     Task<Command> WrapSegmenter(

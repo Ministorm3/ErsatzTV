@@ -26,6 +26,8 @@ public static partial class StreamVariableExpander
             return input;
         }
 
+        queryParameters ??= EmptyParameters;
+
         return VariablePattern().Replace(
             input,
             match =>

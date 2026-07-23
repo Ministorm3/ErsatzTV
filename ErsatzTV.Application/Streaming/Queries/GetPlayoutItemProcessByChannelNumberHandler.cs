@@ -304,7 +304,7 @@ public class GetPlayoutItemProcessByChannelNumberHandler : FFmpegProcessHandler<
             if (playoutItemWithPath.PlayoutItem.MediaItem is RemoteStream &&
                 StreamVariableExpander.HasVariables(videoPath))
             {
-                videoPath = StreamVariableExpander.Expand(videoPath, channel.Number);
+                videoPath = StreamVariableExpander.Expand(videoPath, channel.Number, request.QueryParameters);
             }
 
             string audioPath = videoPath;

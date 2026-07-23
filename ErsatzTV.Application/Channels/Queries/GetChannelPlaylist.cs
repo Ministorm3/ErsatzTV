@@ -8,4 +8,5 @@ public record GetChannelPlaylist(
     string BaseUrl,
     string Mode,
     string UserAgent,
-    string AccessToken) : IRequest<ChannelPlaylist>;
+    string AccessToken,
+    string ExtraQuery = null) : IRequest<ChannelPlaylist>;

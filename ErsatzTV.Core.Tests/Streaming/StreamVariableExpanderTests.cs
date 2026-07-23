@@ -151,6 +151,17 @@ public class StreamVariableExpanderTests
         }
 
         [Test]
+        public void Should_Treat_Null_Parameters_As_Empty()
+        {
+            string result = StreamVariableExpander.Expand(
+                "http://localhost:8000/stream?r={query:region|fallback}",
+                "30",
+                null);
+
+            result.ShouldBe("http://localhost:8000/stream?r=fallback");
+        }
+
+        [Test]
         public void Should_Expand_Script_Command_Line()
         {
             var parameters = new Dictionary<string, string> { ["profile"] = "hd" };

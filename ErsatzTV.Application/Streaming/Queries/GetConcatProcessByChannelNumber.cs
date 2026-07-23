@@ -4,7 +4,11 @@ namespace ErsatzTV.Application.Streaming;
 
 public record GetConcatProcessByChannelNumber : FFmpegProcessRequest
 {
-    public GetConcatProcessByChannelNumber(string scheme, string host, string channelNumber) : base(
+    public GetConcatProcessByChannelNumber(
+        string scheme,
+        string host,
+        string channelNumber,
+        string extraQuery = null) : base(
         channelNumber,
         StreamingMode.TransportStream,
         DateTimeOffset.Now,
@@ -16,8 +20,10 @@ public record GetConcatProcessByChannelNumber : FFmpegProcessRequest
     {
         Scheme = scheme;
         Host = host;
+        ExtraQuery = extraQuery;
     }
 
     public string Scheme { get; }
     public string Host { get; }
+    public string ExtraQuery { get; }
 }

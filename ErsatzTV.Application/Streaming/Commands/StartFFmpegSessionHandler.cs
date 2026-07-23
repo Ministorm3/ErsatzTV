@@ -170,8 +170,14 @@ public class StartFFmpegSessionHandler : IRequestHandler<StartFFmpegSession, Eit
 
     private async Task<string> GetMultiVariantPlaylist(StartFFmpegSession request)
     {
+        string query = request.AccessTokenQuery;
+        if (!string.IsNullOrWhiteSpace(request.ExtraQuery))
+        {
+            query = string.IsNullOrWhiteSpace(query) ? $"?{request.ExtraQuery}" : $"{query}&{request.ExtraQuery}";
+        }
+
         var variantPlaylist =
-            $"{request.Scheme}://{request.Host}{request.PathBase}/iptv/session/{request.ChannelNumber}/hls.m3u8{request.AccessTokenQuery}";
+            $"{request.Scheme}://{request.Host}{request.PathBase}/iptv/session/{request.ChannelNumber}/hls.m3u8{query}";
 
         Option<ChannelStreamingSpecsViewModel> maybeStreamingSpecs =
             await _mediator.Send(new GetChannelStreamingSpecs(request.ChannelNumber));

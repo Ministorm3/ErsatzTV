@@ -37,6 +37,7 @@ public class GetConcatProcessByChannelNumberHandler : FFmpegProcessHandler<GetCo
             channel,
             request.Scheme,
             request.Host,
+            request.ExtraQuery,
             cancellationToken);
 
         return new PlayoutItemProcessModel(

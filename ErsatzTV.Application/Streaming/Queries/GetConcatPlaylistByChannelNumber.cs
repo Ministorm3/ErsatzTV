@@ -3,5 +3,10 @@ using ErsatzTV.Core.FFmpeg;
 
 namespace ErsatzTV.Application.Streaming;
 
-public record GetConcatPlaylistByChannelNumber(string Scheme, string Host, string ChannelNumber, string Mode)
+public record GetConcatPlaylistByChannelNumber(
+    string Scheme,
+    string Host,
+    string ChannelNumber,
+    string Mode,
+    string ExtraQuery = null)
     : IRequest<Either<BaseError, ConcatPlaylist>>;

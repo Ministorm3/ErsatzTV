@@ -981,12 +981,14 @@ public class FFmpegLibraryProcessService : IFFmpegProcessService
         Channel channel,
         string scheme,
         string host,
+        string extraQuery,
         CancellationToken cancellationToken)
     {
         var resolution = new FrameSize(channel.FFmpegProfile.Resolution.Width, channel.FFmpegProfile.Resolution.Height);
 
+        string concatQuery = string.IsNullOrWhiteSpace(extraQuery) ? string.Empty : $"&{extraQuery}";
         var concatInputFile = new ConcatInputFile(
-            $"http://localhost:{Settings.StreamingPort}/ffmpeg/concat/{channel.Number}?mode=ts-legacy",
+            $"http://localhost:{Settings.StreamingPort}/ffmpeg/concat/{channel.Number}?mode=ts-legacy{concatQuery}",
             resolution);
 
         IPipelineBuilder pipelineBuilder = await _pipelineBuilderFactory.GetBuilder(
