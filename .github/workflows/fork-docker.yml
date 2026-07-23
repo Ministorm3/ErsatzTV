@@ -1,0 +1,66 @@
+name: Build & Publish Fork Image
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - custom
+permissions:
+  contents: read
+  packages: write
+jobs:
+  build_image:
+    name: Build amd64 image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calculate version
+        shell: bash
+        run: |
+          tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          short=$(git rev-parse --short HEAD)
+          echo "INFO_VERSION=${tag:1}-${short}" >> $GITHUB_ENV
+
+      - name: Set image name
+        shell: bash
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ersatztv" >> $GITHUB_ENV
+
+      - name: Download next artifacts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download develop --repo ErsatzTV/next --pattern "ersatztv-next-*-linux-x64.tar.gz" --dir next-download
+          mkdir next-extracted
+          tar xzvf next-download/*.tar.gz -C next-extracted --strip-components 1
+          mv next-extracted/ersatztv-channel .
+          rm -rf next-download next-extracted
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          push: true
+          provenance: false
+          platforms: linux/amd64
+          build-args: |
+            INFO_VERSION=${{ env.INFO_VERSION }}-docker
+          tags: |
+            ${{ env.IMAGE_NAME }}:custom
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
