@@ -41,6 +41,7 @@ public interface IFFmpegProcessService
         TimeSpan ptsOffset,
         Option<FrameRate> targetFramerate,
         Option<string> customReportsFolder,
+        Option<string> outputFolderName,
         Action<FFmpegPipeline> pipelineAction,
         bool canProxy,
         CancellationToken cancellationToken);

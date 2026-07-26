@@ -26,17 +26,20 @@ public class IptvController : StreamingControllerBase
     private readonly IFFmpegSegmenterService _ffmpegSegmenterService;
     private readonly ILogger<IptvController> _logger;
     private readonly IMediator _mediator;
+    private readonly IStreamVariantSessionService _streamVariantSessionService;
 
     public IptvController(
         IMediator mediator,
         IGraphicsEngine graphicsEngine,
         ILogger<IptvController> logger,
-        IFFmpegSegmenterService ffmpegSegmenterService)
+        IFFmpegSegmenterService ffmpegSegmenterService,
+        IStreamVariantSessionService streamVariantSessionService)
         : base(graphicsEngine, logger)
     {
         _mediator = mediator;
         _logger = logger;
         _ffmpegSegmenterService = ffmpegSegmenterService;
+        _streamVariantSessionService = streamVariantSessionService;
     }
 
     [HttpHead("iptv/channels.m3u")]
@@ -165,6 +168,19 @@ public class IptvController : StreamingControllerBase
     {
         // _logger.LogDebug("Checking for session worker for channel {Channel}", channelNumber);
 
+        Dictionary<string, string> customParameters = Request.Query.CustomParameters();
+        if (customParameters.Count > 0)
+        {
+            Option<string> maybeStitched = await _streamVariantSessionService.GetPlaylist(
+                channelNumber,
+                customParameters,
+                cancellationToken);
+            foreach (string stitched in maybeStitched)
+            {
+                return Content(stitched, "application/vnd.apple.mpegurl");
+            }
+        }
+
         if (_ffmpegSegmenterService.TryGetWorker(channelNumber, out IHlsSessionWorker worker) && worker is not null)
         {
             // _logger.LogDebug("Trimming playlist for channel {Channel}", channelNumber);
@@ -184,6 +200,13 @@ public class IptvController : StreamingControllerBase
         _logger.LogWarning(
             "Unable to locate session worker for channel {Channel}; will redirect to start session",
             channelNumber);
+
+        if (customParameters.Count > 0)
+        {
+            return Redirect(
+                $"~/iptv/channel/{channelNumber}.m3u8{AccessTokenQuery().AppendQuery(customParameters.ToQueryString())}");
+        }
+
         return RedirectToAction(nameof(GetHttpLiveStreamingVideo), new { channelNumber });
     }
 

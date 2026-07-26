@@ -14,7 +14,8 @@ public record GetPlayoutItemProcessByChannelNumber(
     Option<FrameRate> TargetFramerate,
     bool IsTroubleshooting,
     Option<int> FFmpegProfileId,
-    IReadOnlyDictionary<string, string> QueryParameters = null) : FFmpegProcessRequest(
+    IReadOnlyDictionary<string, string> QueryParameters = null,
+    string OutputFolderName = null) : FFmpegProcessRequest(
     ChannelNumber,
     Mode,
     Now,

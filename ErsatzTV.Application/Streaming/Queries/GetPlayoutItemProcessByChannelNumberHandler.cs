@@ -419,6 +419,7 @@ public class GetPlayoutItemProcessByChannelNumberHandler : FFmpegProcessHandler<
                 request.PtsOffset,
                 request.TargetFramerate,
                 request.IsTroubleshooting ? FileSystemLayout.TranscodeTroubleshootingFolder : Option<string>.None,
+                Optional(request.OutputFolderName),
                 _ => { },
                 canProxy: true,
                 cancellationToken);

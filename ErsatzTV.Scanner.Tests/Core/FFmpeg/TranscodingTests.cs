@@ -416,6 +416,7 @@ public class TranscodingTests
             TimeSpan.Zero,
             None,
             Option<string>.None,
+            Option<string>.None,
             _ => { },
             canProxy: false,
             CancellationToken.None);
@@ -752,6 +753,7 @@ public class TranscodingTests
             DateTimeOffset.Now,
             TimeSpan.Zero,
             None,
+            Option<string>.None,
             Option<string>.None,
             PipelineAction,
             canProxy: false,

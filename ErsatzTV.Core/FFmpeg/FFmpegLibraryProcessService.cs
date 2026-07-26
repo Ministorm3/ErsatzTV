@@ -100,6 +100,7 @@ public class FFmpegLibraryProcessService : IFFmpegProcessService
         TimeSpan ptsOffset,
         Option<FrameRate> targetFramerate,
         Option<string> customReportsFolder,
+        Option<string> outputFolderName,
         Action<FFmpegPipeline> pipelineAction,
         bool canProxy,
         CancellationToken cancellationToken)
@@ -429,18 +430,20 @@ public class FFmpegLibraryProcessService : IFFmpegProcessService
             channel.FFmpegProfile.VideoPreset,
             FFmpegLibraryHelper.MapBitDepth(channel.FFmpegProfile.BitDepth));
 
+        string outputFolder = outputFolderName.IfNone(channel.Number);
+
         Option<string> hlsPlaylistPath = outputFormat is OutputFormatKind.Hls or OutputFormatKind.HlsMp4
-            ? Path.Combine(FileSystemLayout.TranscodeFolder, channel.Number, "live.m3u8")
+            ? Path.Combine(FileSystemLayout.TranscodeFolder, outputFolder, "live.m3u8")
             : Option<string>.None;
 
         long nowSeconds = now.ToUnixTimeSeconds();
 
         Option<string> hlsSegmentTemplate = outputFormat switch
         {
-            OutputFormatKind.Hls => Path.Combine(FileSystemLayout.TranscodeFolder, channel.Number, "live%06d.ts"),
+            OutputFormatKind.Hls => Path.Combine(FileSystemLayout.TranscodeFolder, outputFolder, "live%06d.ts"),
             OutputFormatKind.HlsMp4 => Path.Combine(
                 FileSystemLayout.TranscodeFolder,
-                channel.Number,
+                outputFolder,
                 $"live_{nowSeconds}_%06d.m4s"),
             _ => Option<string>.None
         };

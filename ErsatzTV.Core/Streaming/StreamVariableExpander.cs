@@ -10,6 +10,10 @@ public static partial class StreamVariableExpander
     public static bool HasVariables(string input) =>
         !string.IsNullOrEmpty(input) && VariablePattern().IsMatch(input);
 
+    public static bool HasQueryVariables(string input) =>
+        !string.IsNullOrEmpty(input) &&
+        VariablePattern().Matches(input).Any(match => match.Groups["key"].Success);
+
     public static string Expand(string input, Option<string> channelNumber) =>
         Expand(input, channelNumber, EmptyParameters);
 

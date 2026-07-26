@@ -325,6 +325,7 @@ public class PrepareTroubleshootingPlaybackHandler(
             TimeSpan.Zero,
             Option<FrameRate>.None,
             FileSystemLayout.TranscodeTroubleshootingFolder,
+            Option<string>.None,
             _ => { },
             canProxy: true,
             cancellationToken);

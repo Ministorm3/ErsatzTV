@@ -727,6 +727,7 @@ public class Startup
         services.AddSingleton<IScannerProxyService, ScannerProxyService>();
         services.AddSingleton<IScriptedPlayoutBuilderService, ScriptedPlayoutBuilderService>();
         services.AddSingleton<IFFmpegSegmenterService, FFmpegSegmenterService>();
+        services.AddSingleton<IStreamVariantSessionService, StreamVariantSessionService>();
         services.AddSingleton<ITempFilePool, TempFilePool>();
         services.AddSingleton<IHlsPlaylistFilter, HlsPlaylistFilter>();
         services.AddSingleton<RecyclableMemoryStreamManager>();
