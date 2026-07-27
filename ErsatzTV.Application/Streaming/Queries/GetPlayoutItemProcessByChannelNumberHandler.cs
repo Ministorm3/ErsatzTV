@@ -8,6 +8,7 @@ using ErsatzTV.Core.Extensions;
 using ErsatzTV.Core.FFmpeg;
 using ErsatzTV.Core.Interfaces.FFmpeg;
 using ErsatzTV.Core.Interfaces.Streaming;
+using ErsatzTV.Core.Streaming;
 using ErsatzTV.FFmpeg;
 using ErsatzTV.FFmpeg.State;
 using ErsatzTV.Infrastructure.Data;
@@ -300,7 +301,17 @@ public class GetPlayoutItemProcessByChannelNumberHandler : FFmpegProcessHandler<
             string videoPath = playoutItemWithPath.Path;
             MediaVersion videoVersion = version;
 
-            string audioPath = playoutItemWithPath.Path;
+            // the path resolved above has already had its variables replaced with
+            // declared defaults, since no channel is known at that point; expand
+            // the stored template again here, where the channel number is
+            if (playoutItemWithPath.PlayoutItem.MediaItem is RemoteStream remoteStream &&
+                !string.IsNullOrWhiteSpace(remoteStream.Url) &&
+                StreamVariableExpander.HasVariables(remoteStream.Url))
+            {
+                videoPath = StreamVariableExpander.ExpandUrl(remoteStream.Url, channel.Number, null);
+            }
+
+            string audioPath = videoPath;
             MediaVersion audioVersion = version;
 
             Option<ChannelWatermark> maybeGlobalWatermark = await dbContext.ConfigElements

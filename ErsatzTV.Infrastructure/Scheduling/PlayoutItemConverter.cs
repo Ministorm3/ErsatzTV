@@ -11,6 +11,7 @@ using ErsatzTV.Core.Interfaces.FFmpeg;
 using ErsatzTV.Core.Interfaces.Jellyfin;
 using ErsatzTV.Core.Interfaces.Plex;
 using ErsatzTV.Core.Interfaces.Scheduling;
+using ErsatzTV.Core.Streaming;
 using ErsatzTV.FFmpeg.State;
 using ErsatzTV.Infrastructure.Data;
 using ErsatzTV.Infrastructure.Extensions;
@@ -95,7 +96,10 @@ public class PlayoutItemConverter(
             Finish = playoutItem.FinishOffset
         };
 
-        Option<Core.Next.Source> maybeSource = await SourceForItem(playoutItem, cancellationToken);
+        Option<Core.Next.Source> maybeSource = await SourceForItem(
+            maybeChannel.Map(c => c.Number),
+            playoutItem,
+            cancellationToken);
         if (maybeSource.IsNone)
         {
             return Option<Core.Next.PlayoutItem>.None;
@@ -235,6 +239,7 @@ public class PlayoutItemConverter(
     }
 
     private async Task<Option<Core.Next.Source>> SourceForItem(
+        Option<string> channelNumber,
         PlayoutItem playoutItem,
         CancellationToken cancellationToken)
     {
@@ -251,19 +256,25 @@ public class PlayoutItemConverter(
         {
             if (!string.IsNullOrWhiteSpace(remoteStream.Url))
             {
-                if (remoteStream.Url.StartsWith("rtsp://", StringComparison.OrdinalIgnoreCase))
+                // the channel is known here, so {channel_number} resolves the
+                // same way it does for the legacy engine; expand before
+                // inspecting the scheme so a templated url is classified by its
+                // resolved form
+                string url = StreamVariableExpander.ExpandUrl(remoteStream.Url, channelNumber, null);
+
+                if (url.StartsWith("rtsp://", StringComparison.OrdinalIgnoreCase))
                 {
                     return new Core.Next.Source
                     {
                         SourceType = Core.Next.SourceType.Rtsp,
-                        Uri = remoteStream.Url
+                        Uri = url
                     };
                 }
 
                 return new Core.Next.Source
                 {
                     SourceType = Core.Next.SourceType.Http,
-                    Uri = remoteStream.Url,
+                    Uri = url,
                     IsLive = remoteStream.IsLive,
                     KeepAlive = true,
                     Reconnect = true
