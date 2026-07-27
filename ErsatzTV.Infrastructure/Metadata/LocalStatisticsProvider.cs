@@ -11,6 +11,7 @@ using ErsatzTV.Core.Domain;
 using ErsatzTV.Core.Extensions;
 using ErsatzTV.Core.Interfaces.Metadata;
 using ErsatzTV.Core.Interfaces.Repositories;
+using ErsatzTV.Core.Streaming;
 using ErsatzTV.FFmpeg.Capabilities;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
@@ -681,7 +682,7 @@ public partial class LocalStatisticsProvider : ILocalStatisticsProvider
         if (mediaItem is RemoteStream remoteStream)
         {
             path = !string.IsNullOrWhiteSpace(remoteStream.Url)
-                ? remoteStream.Url
+                ? StreamVariableExpander.ExpandWithDefaults(remoteStream.Url)
                 : $"http://localhost:{Settings.StreamingPort}/ffmpeg/remote-stream/{remoteStream.Id}";
         }
 

@@ -14,6 +14,7 @@ using ErsatzTV.Core.Domain;
 using ErsatzTV.Core.FFmpeg;
 using ErsatzTV.Core.Interfaces.Scheduling;
 using ErsatzTV.Core.Interfaces.Streaming;
+using ErsatzTV.Core.Streaming;
 using ErsatzTV.Extensions;
 using ErsatzTV.FFmpeg;
 using ErsatzTV.Infrastructure.Data;
@@ -89,7 +90,7 @@ public class InternalController : StreamingControllerBase
         {
             if (!string.IsNullOrWhiteSpace(remoteStream.Url))
             {
-                return new RedirectResult(remoteStream.Url);
+                return new RedirectResult(StreamVariableExpander.ExpandWithDefaults(remoteStream.Url));
             }
 
             if (!string.IsNullOrWhiteSpace(remoteStream.Script))

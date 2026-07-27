@@ -12,6 +12,7 @@ using ErsatzTV.Core.Interfaces.Jellyfin;
 using ErsatzTV.Core.Interfaces.Plex;
 using ErsatzTV.Core.Interfaces.Repositories;
 using ErsatzTV.Core.Scheduling;
+using ErsatzTV.Core.Streaming;
 using ErsatzTV.Infrastructure.Data;
 using ErsatzTV.Infrastructure.Extensions;
 using Microsoft.EntityFrameworkCore;
@@ -236,7 +237,7 @@ public class DynamicPlayoutItemService(
             if (playoutItem.MediaItem is RemoteStream remoteStream)
             {
                 path = !string.IsNullOrWhiteSpace(remoteStream.Url)
-                    ? remoteStream.Url
+                    ? StreamVariableExpander.ExpandWithDefaults(remoteStream.Url)
                     : $"http://localhost:{Settings.StreamingPort}/ffmpeg/remote-stream/{remoteStream.Id}";
             }
 
