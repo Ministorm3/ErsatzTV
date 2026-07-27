@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 ### Added
 - Show Legacy, Next and FFmpeg versions in **Troubleshooting** > **General**
+- Support template variables in remote stream URLs, so one remote stream item can be scheduled on many channels
+  - For example, `http://headend.local/feeds/{channel_number}/master.m3u8` pulls a different upstream feed on each channel that plays it, instead of requiring one remote stream item per channel
+  - `{query:name|default}` variables are also recognized and currently resolve to their declared default; a follow-up will allow supplying values per request
+  - Variables use their default (or an empty string) when no value is available; unrecognized braced text is left untouched, so existing URLs keep working
+  - Make sure the defaults-only form of a templated URL is itself playable, since library scanning and probing use it
 
 ### Changed
 - Upgrade all bundled versions of ffmpeg from 7.1 to 8.1.2
