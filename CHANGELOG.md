@@ -11,6 +11,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [26.7.0] - 2026-07-27
 ### Added
 - Show Legacy, Next and FFmpeg versions in **Troubleshooting** > **General**
+- Add `System` option to **Settings** > **UI** > **Theme**
+  - Follows the light or dark preference of the browser that is viewing ErsatzTV, and updates without a refresh when that preference changes
 
 ### Changed
 - Upgrade all bundled versions of ffmpeg from 7.1 to 8.1.2
