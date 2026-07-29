@@ -175,12 +175,12 @@ public class IptvController : StreamingControllerBase
             // many will abandon it, so ask them to retry shortly instead.
             if (cancellationToken.IsCancellationRequested)
             {
-                _logger.LogDebug("Trim playlist canceled for channel {Channel}", channelNumber);
+                _logger.LogDebug("Trim playlist was canceled for channel {Channel}", channelNumber);
             }
             else
             {
                 _logger.LogWarning(
-                    "Trim playlist failure; will ask client to retry channel {Channel}",
+                    "Trim playlist failure for channel {Channel}; will ask client to retry",
                     channelNumber);
             }
 
