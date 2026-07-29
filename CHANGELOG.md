@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
+### Fixed
+- Fix regression from `v26.2.0` that caused channel logo watermarks to be ignored when the logo is a url
+  - This affected external logo urls and generated channel logos
+
+## [26.7.0] - 2026-07-27
+### Added
+- Show Legacy, Next and FFmpeg versions in **Troubleshooting** > **General**
+
 ### Changed
 - Upgrade all bundled versions of ffmpeg from 7.1 to 8.1.2
   - Other versions (`linux64` and `linuxarm64`) are available at https://github.com/ErsatzTV/ErsatzTV-ffmpeg/releases/tag/8.1.2
@@ -29,13 +37,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - Content that can never play was still counted as waiting to play, so that never happened and the order stayed the same forever
   - This was caused by specials (season 0), which are skipped by `Season, Episode` order; marathons grouped by show or season use that order unless `Marathon Shuffle Items` is enabled
   - Affected playouts also became slower to build the longer they ran
-- Fix shuffled playlists and marathon groups changing order when a playout is rebuilt
+- Fix shuffled playlists and marathon groups changing order when a playout is rebuilt (continued or refreshed)
   - Existing playlists and marathons will change order once after updating
 - Fix playlists used as filler skipping content
   - When something doesn't fit, ETV puts the filler back where it was and tries again, but playlists were only partly put back
   - This could skip playlist content, and could cause the next playout build to resume in the wrong place
+- Fix case where block playouts would occasionally get stuck building forever
 - Fix green line sometimes seen with NVIDIA and AMD/VAAPI encoding
   - Both bugs were in ffmpeg, and ETV's patched ffmpeg 8.1.2 is required for the fixes
+- Pass extracted subtitle paths to next engine; this fixes text subtitle burn-in when extraction is enabled
+  - Embedded text subtitles will otherwise be ignored and unused (when extraction is disabled)
+- Fix next engine music video playback when music video credits are disabled
+- Fix playback when seeking into content beyond final text subtitle cue
 
 ## [26.6.0] - 2026-07-09
 ### Added
@@ -3294,7 +3307,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Initial release to facilitate testing outside of Docker.
 
 
-[Unreleased]: https://github.com/ErsatzTV/legacy/compare/v26.6.0...HEAD
+[Unreleased]: https://github.com/ErsatzTV/legacy/compare/v26.7.0...HEAD
+[26.7.0]: https://github.com/ErsatzTV/legacy/compare/v26.6.0...v26.7.0
 [26.6.0]: https://github.com/ErsatzTV/legacy/compare/v26.5.1...v26.6.0
 [26.5.1]: https://github.com/ErsatzTV/legacy/compare/v26.5.0...v26.5.1
 [26.5.0]: https://github.com/ErsatzTV/legacy/compare/v26.4.0...v26.5.0
