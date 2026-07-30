@@ -28,16 +28,24 @@ jobs:
         shell: bash
         run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ersatztv" >> $GITHUB_ENV
 
-      - name: Download next artifacts
+      - name: Log in to the Container registry (pull next image)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # the bundled worker comes from the fork's next image rather than the
+      # upstream release, so the legacy-hosted worker and the standalone next
+      # server always agree on sidecar and stream-variable behavior
+      - name: Extract next worker from fork image
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download develop --repo ErsatzTV/next --pattern "ersatztv-next-*-linux-x64.tar.gz" --dir next-download
-          mkdir next-extracted
-          tar xzvf next-download/*.tar.gz -C next-extracted --strip-components 1
-          mv next-extracted/ersatztv-channel .
-          rm -rf next-download next-extracted
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ersatztv-next:latest"
+          docker pull "$image"
+          container=$(docker create "$image")
+          docker cp "$container:/app/ersatztv-channel" ./ersatztv-channel
+          docker rm "$container"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
