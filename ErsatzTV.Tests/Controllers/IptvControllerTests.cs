@@ -80,8 +80,7 @@ public class IptvControllerTests
             Substitute.For<IMediator>(),
             Substitute.For<IGraphicsEngine>(),
             NullLogger<IptvController>.Instance,
-            segmenterService,
-            Substitute.For<IStreamVariantSessionService>())
+            segmenterService)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
