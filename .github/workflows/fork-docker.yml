@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - custom
+      - next-only
 permissions:
   contents: read
   packages: write
@@ -67,7 +67,7 @@ jobs:
           build-args: |
             INFO_VERSION=${{ env.INFO_VERSION }}-docker
           tags: |
-            ${{ env.IMAGE_NAME }}:custom
+            ${{ env.IMAGE_NAME }}:next-only
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
           # docker (not oci) media types so registry update checkers that only
           # send docker accept headers can still resolve the manifest
