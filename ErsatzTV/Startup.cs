@@ -72,6 +72,7 @@ using ErsatzTV.Infrastructure.Sqlite.Data;
 using ErsatzTV.Infrastructure.Streaming;
 using ErsatzTV.Infrastructure.Streaming.Graphics;
 using ErsatzTV.Infrastructure.Trakt;
+using ErsatzTV.Middleware;
 using ErsatzTV.Serialization;
 using ErsatzTV.Services;
 using ErsatzTV.Services.RunOnce;
@@ -600,6 +601,10 @@ public class Startup
         // fix static file TS mime type
         extensionProvider.Mappings.Remove(".ts");
         extensionProvider.Mappings.Add(".ts", "video/mp2t");
+
+        // a next channel's media playlist is served as a static file below, so this has to run
+        // first to have any chance of answering a request that carries a viewer cohort
+        app.UseNextCohortPlaylists();
 
         app.UseStaticFiles(
             new StaticFileOptions

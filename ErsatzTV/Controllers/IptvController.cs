@@ -15,6 +15,7 @@ using ErsatzTV.FFmpeg;
 using ErsatzTV.Filters;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Primitives;
 
 namespace ErsatzTV.Controllers;
 
@@ -23,6 +24,9 @@ namespace ErsatzTV.Controllers;
 [ServiceFilter(typeof(ConditionalIptvAuthorizeFilter))]
 public class IptvController : StreamingControllerBase
 {
+    // consumed by streaming itself, so never forwarded to a channel worker
+    private static readonly string[] ReservedQueryParameters = ["mode", "access_token", "index"];
+
     private readonly IFFmpegSegmenterService _ffmpegSegmenterService;
     private readonly ILogger<IptvController> _logger;
     private readonly IMediator _mediator;
@@ -51,7 +55,8 @@ public class IptvController : StreamingControllerBase
                     Request.PathBase,
                     mode,
                     Request.Headers.UserAgent,
-                    Request.Query["access_token"]))
+                    Request.Query["access_token"],
+                    ForwardedQueryParameters(Request.Query)))
             .Map<ChannelPlaylist, IActionResult>(Ok);
 
     [HttpHead("iptv/xmltv.xml")]
@@ -238,7 +243,7 @@ public class IptvController : StreamingControllerBase
                         Request.Scheme,
                         Request.Host.ToString(),
                         Request.PathBase,
-                        AccessTokenQuery());
+                        NextPlaylistQuery());
                 Either<BaseError, string> result = await _mediator.Send(request);
                 return result.Match<IActionResult>(
                     multiVariantPlaylist =>
@@ -325,4 +330,58 @@ public class IptvController : StreamingControllerBase
     private string AccessTokenQuery() => string.IsNullOrWhiteSpace(Request.Query["access_token"])
         ? string.Empty
         : $"?access_token={Request.Query["access_token"]}";
+
+    private string NextPlaylistQuery() => NextPlaylistQuery(Request.Query);
+
+    /// <summary>
+    ///     The query to put on a next channel's media playlist urls: the access token, plus every
+    ///     parameter that streaming itself does not consume.
+    /// </summary>
+    /// <remarks>
+    ///     The channel worker decides which of the forwarded parameters identify a viewer cohort,
+    ///     since that depends on the playout it is currently running. Anything it does not
+    ///     recognize is ignored, so forwarding indiscriminately is safe and keeps this end free of
+    ///     cohort knowledge. Dropping a parameter here, on the other hand, is invisible: the
+    ///     stream keeps working and simply never varies.
+    /// </remarks>
+    public static string NextPlaylistQuery(IQueryCollection query)
+    {
+        var parts = new List<string>();
+
+        // preserved verbatim, exactly as AccessTokenQuery has always emitted it
+        if (!string.IsNullOrWhiteSpace(query["access_token"]))
+        {
+            parts.Add($"access_token={query["access_token"]}");
+        }
+
+        string forwarded = ForwardedQueryParameters(query);
+        if (!string.IsNullOrEmpty(forwarded))
+        {
+            parts.Add(forwarded);
+        }
+
+        return parts.Count == 0 ? string.Empty : $"?{string.Join('&', parts)}";
+    }
+
+    /// <summary>
+    ///     Every query parameter streaming itself does not consume, joined with <c>&amp;</c> and
+    ///     carrying no leading separator.
+    /// </summary>
+    public static string ForwardedQueryParameters(IQueryCollection query)
+    {
+        var parts = new List<string>();
+
+        foreach ((string key, StringValues values) in query)
+        {
+            if (ReservedQueryParameters.Contains(key, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string value = values.LastOrDefault() ?? string.Empty;
+            parts.Add($"{Uri.EscapeDataString(key)}={Uri.EscapeDataString(value)}");
+        }
+
+        return string.Join('&', parts);
+    }
 }

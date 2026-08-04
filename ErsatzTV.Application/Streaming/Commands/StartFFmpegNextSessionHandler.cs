@@ -176,10 +176,10 @@ public class StartFFmpegNextSessionHandler(
     private async Task<string> GetMultiVariantPlaylist(StartFFmpegNextSession request)
     {
         var variantPlaylist =
-            $"{request.Scheme}://{request.Host}{request.PathBase}/iptv/session/{request.ChannelNumber}/live.m3u8{request.AccessTokenQuery}";
+            $"{request.Scheme}://{request.Host}{request.PathBase}/iptv/session/{request.ChannelNumber}/live.m3u8{request.PlaylistQuery}";
 
         var subtitlePlaylist =
-            $"{request.Scheme}://{request.Host}{request.PathBase}/iptv/session/{request.ChannelNumber}/live_sub.m3u8{request.AccessTokenQuery}";
+            $"{request.Scheme}://{request.Host}{request.PathBase}/iptv/session/{request.ChannelNumber}/live_sub.m3u8{request.PlaylistQuery}";
 
         Option<ChannelStreamingSpecsViewModel> maybeStreamingSpecs =
             await mediator.Send(new GetChannelStreamingSpecs(request.ChannelNumber));

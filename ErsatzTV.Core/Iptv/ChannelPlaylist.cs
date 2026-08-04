@@ -9,6 +9,7 @@ public class ChannelPlaylist
     private readonly string _accessToken;
     private readonly string _baseUrl;
     private readonly List<Channel> _channels;
+    private readonly string _forwardedQuery;
     private readonly string _host;
     private readonly string _scheme;
     private readonly string _userAgent;
@@ -19,7 +20,8 @@ public class ChannelPlaylist
         string baseUrl,
         List<Channel> channels,
         string userAgent,
-        string accessToken)
+        string accessToken,
+        string forwardedQuery = null)
     {
         _scheme = scheme;
         _host = host;
@@ -27,6 +29,7 @@ public class ChannelPlaylist
         _channels = channels;
         _userAgent = userAgent;
         _accessToken = accessToken;
+        _forwardedQuery = forwardedQuery;
     }
 
     public string ToM3U()
@@ -89,11 +92,31 @@ public class ChannelPlaylist
             sb.AppendLine(
                 CultureInfo.InvariantCulture,
                 $"#EXTINF:0 tvg-id=\"{ChannelIdentifier.FromNumber(channel.Number)}\" channel-id=\"{shortUniqueId}\" channel-number=\"{channel.Number}\" CUID=\"{shortUniqueId}\" tvg-chno=\"{channel.Number}\" tvg-name=\"{channel.Name}\" tvg-logo=\"{logo}\" group-title=\"{channel.Group}\" tvc-stream-vcodec=\"{vcodec}\" tvc-stream-acodec=\"{acodec}\", {channel.Name}");
-            sb.AppendLine(
-                CultureInfo.InvariantCulture,
-                $"{_scheme}://{_host}{_baseUrl}/iptv/channel/{channel.Number}.{format}");
+            var channelUri = $"{_scheme}://{_host}{_baseUrl}/iptv/channel/{channel.Number}.{format}";
+
+            sb.AppendLine(CultureInfo.InvariantCulture, $"{AppendQuery(channelUri, _forwardedQuery)}");
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    ///     Carries the parameters a viewer asked this playlist for onto each channel url, so one
+    ///     playlist url per audience keeps its identity all the way to the stream.
+    /// </summary>
+    /// <remarks>
+    ///     Every channel gets them, not just next channels: which parameters mean anything depends
+    ///     on the playout a channel is running, and only its worker knows that. A channel that
+    ///     recognizes none of them ignores them.
+    /// </remarks>
+    private static string AppendQuery(string uri, string query)
+    {
+        if (string.IsNullOrEmpty(query))
+        {
+            return uri;
+        }
+
+        // a mode or an access token may already have opened the query string
+        return uri.Contains('?', StringComparison.Ordinal) ? $"{uri}&{query}" : $"{uri}?{query}";
     }
 }
