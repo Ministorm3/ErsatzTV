@@ -55,7 +55,8 @@ public class IptvController : StreamingControllerBase
                     Request.PathBase,
                     mode,
                     Request.Headers.UserAgent,
-                    Request.Query["access_token"]))
+                    Request.Query["access_token"],
+                    ForwardedQueryParameters(Request.Query)))
             .Map<ChannelPlaylist, IActionResult>(Ok);
 
     [HttpHead("iptv/xmltv.xml")]
@@ -353,6 +354,23 @@ public class IptvController : StreamingControllerBase
             parts.Add($"access_token={query["access_token"]}");
         }
 
+        string forwarded = ForwardedQueryParameters(query);
+        if (!string.IsNullOrEmpty(forwarded))
+        {
+            parts.Add(forwarded);
+        }
+
+        return parts.Count == 0 ? string.Empty : $"?{string.Join('&', parts)}";
+    }
+
+    /// <summary>
+    ///     Every query parameter streaming itself does not consume, joined with <c>&amp;</c> and
+    ///     carrying no leading separator.
+    /// </summary>
+    public static string ForwardedQueryParameters(IQueryCollection query)
+    {
+        var parts = new List<string>();
+
         foreach ((string key, StringValues values) in query)
         {
             if (ReservedQueryParameters.Contains(key, StringComparer.OrdinalIgnoreCase))
@@ -364,6 +382,6 @@ public class IptvController : StreamingControllerBase
             parts.Add($"{Uri.EscapeDataString(key)}={Uri.EscapeDataString(value)}");
         }
 
-        return parts.Count == 0 ? string.Empty : $"?{string.Join('&', parts)}";
+        return string.Join('&', parts);
     }
 }

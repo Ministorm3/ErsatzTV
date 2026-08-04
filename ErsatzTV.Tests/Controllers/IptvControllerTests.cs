@@ -64,4 +64,22 @@ public class IptvControllerTests
         IptvController.NextPlaylistQuery(Query("?city=New%20York%26x%3D1"))
             .ShouldBe("?city=New%20York%26x%3D1");
     }
+
+    [Test]
+    public void ForwardedQueryParameters_ShouldBeEmpty_WhenOnlyStreamingParametersWereAsked()
+    {
+        IptvController.ForwardedQueryParameters(Query("?mode=segmenter&access_token=abc"))
+            .ShouldBeEmpty();
+    }
+
+    /// <summary>
+    ///     The access token is added separately by whatever builds the url, so including it here
+    ///     would emit it twice.
+    /// </summary>
+    [Test]
+    public void ForwardedQueryParameters_ShouldCarryNoLeadingSeparatorAndNoAccessToken()
+    {
+        IptvController.ForwardedQueryParameters(Query("?access_token=abc&zip=15216&lang=en"))
+            .ShouldBe("zip=15216&lang=en");
+    }
 }

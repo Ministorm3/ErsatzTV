@@ -16,7 +16,8 @@ public class GetChannelPlaylistHandler(IChannelRepository channelRepository)
                 request.BaseUrl,
                 channels,
                 request.UserAgent,
-                request.AccessToken));
+                request.AccessToken,
+                request.ForwardedQuery));
 
     private static List<Channel> EnsureMode(IEnumerable<Channel> channels, string mode)
     {
