@@ -4,7 +4,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
+### Added
+- Add `Streaming Engine` dropdown to playback troubleshooter to support troubleshooting Next engine playback
+
+### Changed
+- Upgrade Mesa driver in docker from 25.2.8 to 26.0.3 to fix issues with hevc_vaapi encoder when using radeonsi driver
+
 ### Fixed
+- Fix regression from `v26.6.0` that caused external (sidecar) subtitles from Jellyfin and Emby to go missing
+  - All Jellyfin external subtitles were deleted by hourly maintenance, so they were missing from **Troubleshooting** > **Playback** and were never burned in
+  - Jellyfin and Emby items with multiple external subtitles would keep only one of them after a scan
+  - External subtitles will be restored automatically the next time each Jellyfin or Emby library is scanned
 - Fix regression from `v26.6.0` that broke `MPEG-TS` channels on Windows when the channel name or the ffmpeg path contains non-english characters (like `Télévision`)
   - Affected channels would connect but never send any data
   - `MPEG-TS (Legacy)` and channel preview were not affected

@@ -125,8 +125,8 @@ public class NextSessionWorker(
                 .WithArguments(arguments)
                 .WithEnvironmentVariables(await PlexTokenEnvironment())
                 .WithStandardInputPipe(PipeSource.FromString(channelConfig.ToJson()))
-                .WithStandardOutputPipe(PipeTarget.ToDelegate(l => logger.LogDebug("{Line}", l)))
-                .WithStandardErrorPipe(PipeTarget.ToDelegate(l => logger.LogDebug("{Line}", l)))
+                .WithStandardOutputPipe(PipeTarget.ToDelegate(l => NextLogger.LogNextLine(l, logger)))
+                .WithStandardErrorPipe(PipeTarget.ToDelegate(l => NextLogger.LogNextLine(l, logger)))
                 //.WithStandardOutputPipe(PipeTarget.ToDelegate(progressParser.ParseLine))
                 .WithValidation(CommandResultValidation.None)
                 .ExecuteAsync(_cancellationTokenSource.Token);

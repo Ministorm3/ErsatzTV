@@ -368,6 +368,7 @@ public class Startup
             FileSystemLayout.DefaultMpegTsScriptFolder,
             FileSystemLayout.NextChannelConfigOverlaysFolder,
             FileSystemLayout.NextPlayoutsFolder,
+            FileSystemLayout.TranscodeTroubleshootingPlayoutFolder,
         ];
 
         foreach (string directory in directoriesToCreate)
@@ -471,10 +472,10 @@ public class Startup
 
         services.AddMediatR(config => config.RegisterServicesFromAssemblyContaining<GetAllChannels>());
 
-        services.AddRefitClient<IPlexTvApi>()
+        services.AddRefitGeneratedClient<IPlexTvApi>()
             .ConfigureHttpClient(c => c.BaseAddress = new Uri("https://plex.tv/api/v2"));
 
-        services.AddRefitClient<ITraktApi>(
+        services.AddRefitGeneratedClient<ITraktApi>(
                 new RefitSettings
                 {
                     ContentSerializer = new NewtonsoftJsonContentSerializer(
@@ -833,6 +834,7 @@ public class Startup
         services.AddScoped<IMpegTsScriptService, MpegTsScriptService>();
         services.AddScoped<ILanguageCodeService, LanguageCodeService>();
         services.AddScoped<IPlayoutItemConverter, PlayoutItemConverter>();
+        services.AddScoped<IChannelConfigConverter, ChannelConfigConverter>();
         services.AddScoped<IDynamicPlayoutItemService, DynamicPlayoutItemService>();
 
         services.AddScoped<IFFmpegProcessService, FFmpegLibraryProcessService>();
