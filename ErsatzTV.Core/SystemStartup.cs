@@ -5,12 +5,14 @@ public class SystemStartup : IDisposable
     private readonly SemaphoreSlim _databaseCleaned = new(0, 100);
     private readonly SemaphoreSlim _databaseStartup = new(0, 100);
     private readonly SemaphoreSlim _searchIndexStartup = new(0, 100);
+    private readonly SemaphoreSlim _transcodeFolderStartup = new(0, 100);
 
     private bool _disposedValue;
 
     public bool IsDatabaseReady { get; private set; }
     public bool IsDatabaseCleaned { get; private set; }
     public bool IsSearchIndexReady { get; private set; }
+    public bool IsTranscodeFolderReady { get; private set; }
 
     public void Dispose()
     {
@@ -21,6 +23,7 @@ public class SystemStartup : IDisposable
     public event EventHandler OnDatabaseReady;
     public event EventHandler OnDatabaseCleaned;
     public event EventHandler OnSearchIndexReady;
+    public event EventHandler OnTranscodeFolderReady;
 
     public async Task WaitForDatabase(CancellationToken cancellationToken) =>
         await _databaseStartup.WaitAsync(cancellationToken);
@@ -30,6 +33,19 @@ public class SystemStartup : IDisposable
 
     public async Task WaitForSearchIndex(CancellationToken cancellationToken) =>
         await _searchIndexStartup.WaitAsync(cancellationToken);
+
+    // Unlike the other phases, this one is awaited on every channel session
+    // start for the life of the process, so it short-circuits on the flag
+    // instead of consuming one of the semaphore's 100 permits per call.
+    public async Task WaitForTranscodeFolder(CancellationToken cancellationToken)
+    {
+        if (IsTranscodeFolderReady)
+        {
+            return;
+        }
+
+        await _transcodeFolderStartup.WaitAsync(cancellationToken);
+    }
 
     public void DatabaseIsReady()
     {
@@ -52,6 +68,13 @@ public class SystemStartup : IDisposable
         OnSearchIndexReady?.Invoke(this, EventArgs.Empty);
     }
 
+    public void TranscodeFolderIsReady()
+    {
+        IsTranscodeFolderReady = true;
+        _transcodeFolderStartup.Release(100);
+        OnTranscodeFolderReady?.Invoke(this, EventArgs.Empty);
+    }
+
     protected virtual void Dispose(bool disposing)
     {
         if (!_disposedValue)
@@ -61,6 +84,7 @@ public class SystemStartup : IDisposable
                 _databaseStartup.Dispose();
                 _databaseCleaned.Dispose();
                 _searchIndexStartup.Dispose();
+                _transcodeFolderStartup.Dispose();
             }
 
             _disposedValue = true;

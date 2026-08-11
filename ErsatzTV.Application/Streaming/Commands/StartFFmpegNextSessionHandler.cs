@@ -29,6 +29,7 @@ public class StartFFmpegNextSessionHandler(
     IConfigElementRepository configElementRepository,
     IHostApplicationLifetime hostApplicationLifetime,
     IMediator mediator,
+    SystemStartup systemStartup,
     ChannelWriter<IBackgroundServiceRequest> workerChannel,
     ILogger<StartFFmpegNextSessionHandler> logger,
     ILogger<NextSessionWorker> sessionWorkerLogger)
@@ -40,6 +41,11 @@ public class StartFFmpegNextSessionHandler(
         StartFFmpegNextSession request,
         CancellationToken cancellationToken)
     {
+        // the boot-time transcode purge deletes the per-channel folders; a
+        // session that starts before it finishes has its folder deleted out
+        // from under its freshly spawned worker
+        await systemStartup.WaitForTranscodeFolder(cancellationToken);
+
         Either<BaseError, string> result;
         try
         {

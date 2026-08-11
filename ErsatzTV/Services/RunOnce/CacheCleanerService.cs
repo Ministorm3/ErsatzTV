@@ -17,6 +17,32 @@ public class CacheCleanerService(
     {
         await Task.Yield();
 
+        // The transcode purge deletes the per-channel folders, and every
+        // channel session start waits for it to finish, so it runs FIRST
+        // (it needs no database) and signals unconditionally: it used to
+        // run after the database wait, racing the first viewer requests,
+        // and each active channel's freshly spawned worker died once per
+        // boot when the purge deleted its folder. The finally guarantees
+        // a purge failure can never leave channel starts gated forever.
+        try
+        {
+            using IServiceScope purgeScope = serviceScopeFactory.CreateScope();
+            ILocalFileSystem purgeLocalFileSystem =
+                purgeScope.ServiceProvider.GetRequiredService<ILocalFileSystem>();
+            IFileSystem purgeFileSystem = purgeScope.ServiceProvider.GetRequiredService<IFileSystem>();
+
+            if (purgeFileSystem.Directory.Exists(FileSystemLayout.TranscodeFolder))
+            {
+                logger.LogInformation("Emptying transcode cache folder");
+                purgeLocalFileSystem.EmptyFolder(FileSystemLayout.TranscodeFolder);
+                logger.LogInformation("Done emptying transcode cache folder");
+            }
+        }
+        finally
+        {
+            systemStartup.TranscodeFolderIsReady();
+        }
+
         await systemStartup.WaitForDatabase(stoppingToken);
         if (stoppingToken.IsCancellationRequested)
         {
@@ -52,13 +78,6 @@ public class CacheCleanerService(
 
             logger.LogInformation("Deleting legacy image cache folder");
             Directory.Delete(FileSystemLayout.LegacyImageCacheFolder, true);
-        }
-
-        if (fileSystem.Directory.Exists(FileSystemLayout.TranscodeFolder))
-        {
-            logger.LogInformation("Emptying transcode cache folder");
-            localFileSystem.EmptyFolder(FileSystemLayout.TranscodeFolder);
-            logger.LogInformation("Done emptying transcode cache folder");
         }
 
         if (fileSystem.Directory.Exists(FileSystemLayout.ChannelGuideCacheFolder))

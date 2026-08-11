@@ -34,6 +34,7 @@ public class StartFFmpegSessionHandler : IRequestHandler<StartFFmpegSession, Eit
     private readonly IMediator _mediator;
     private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly ILogger<HlsSessionWorker> _sessionWorkerLogger;
+    private readonly SystemStartup _systemStartup;
     private readonly ChannelWriter<IBackgroundServiceRequest> _workerChannel;
 
     public StartFFmpegSessionHandler(
@@ -49,6 +50,7 @@ public class StartFFmpegSessionHandler : IRequestHandler<StartFFmpegSession, Eit
         IConfigElementRepository configElementRepository,
         IGraphicsEngine graphicsEngine,
         IHostApplicationLifetime hostApplicationLifetime,
+        SystemStartup systemStartup,
         ChannelWriter<IBackgroundServiceRequest> workerChannel)
     {
         _hlsPlaylistFilter = hlsPlaylistFilter;
@@ -63,6 +65,7 @@ public class StartFFmpegSessionHandler : IRequestHandler<StartFFmpegSession, Eit
         _configElementRepository = configElementRepository;
         _graphicsEngine = graphicsEngine;
         _hostApplicationLifetime = hostApplicationLifetime;
+        _systemStartup = systemStartup;
         _workerChannel = workerChannel;
     }
 
@@ -70,6 +73,11 @@ public class StartFFmpegSessionHandler : IRequestHandler<StartFFmpegSession, Eit
         StartFFmpegSession request,
         CancellationToken cancellationToken)
     {
+        // the boot-time transcode purge deletes the per-channel folders; a
+        // session that starts before it finishes has its folder deleted out
+        // from under its freshly spawned worker
+        await _systemStartup.WaitForTranscodeFolder(cancellationToken);
+
         Either<BaseError, string> result;
         try
         {
