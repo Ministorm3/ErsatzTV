@@ -43,6 +43,22 @@ public class NextSessionWorker(
         {
             if (disposing)
             {
+                // disposing a worker must kill its process: disposing only
+                // the scope left the ersatztv-channel process running with
+                // no owner, and an orphaned worker kept writing its output
+                // folder alongside its replacement for eleven hours on
+                // 2026-08-10. Cancellation makes CliWrap kill the child
+                // tree; a worker that never ran has no token and nothing
+                // to kill.
+                try
+                {
+                    _cancellationTokenSource?.Cancel();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // already torn down by a completed Run
+                }
+
                 _serviceScope.Dispose();
                 _serviceScope = null;
             }

@@ -6,8 +6,9 @@ public interface IFFmpegSegmenterService
     event EventHandler OnWorkersChanged;
     bool TryGetWorker(string channelNumber, out IHlsSessionWorker worker);
     bool TryAddWorker(string channelNumber, IHlsSessionWorker worker);
-    void AddOrUpdateWorker(string channelNumber, IHlsSessionWorker worker);
-    void RemoveWorker(string channelNumber, out IHlsSessionWorker inactiveWorker);
+    bool TryActivateWorker(string channelNumber, IHlsSessionWorker worker);
+    bool RemoveWorker(string channelNumber, IHlsSessionWorker expectedWorker);
+    bool RemoveReservation(string channelNumber);
     bool IsActive(string channelNumber);
     Task<bool> StopChannel(string channelNumber, CancellationToken cancellationToken);
     void TouchChannel(string channelNumber, string fileName);

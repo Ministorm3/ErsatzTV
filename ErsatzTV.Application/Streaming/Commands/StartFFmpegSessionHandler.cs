@@ -66,13 +66,41 @@ public class StartFFmpegSessionHandler : IRequestHandler<StartFFmpegSession, Eit
         _workerChannel = workerChannel;
     }
 
-    public Task<Either<BaseError, string>> Handle(StartFFmpegSession request, CancellationToken cancellationToken) =>
-        Validate(request)
-            .MapT(_ => StartProcess(request, cancellationToken))
-            // this weirdness is needed to maintain the error type (.ToEitherAsync() just gives BaseError)
+    public async Task<Either<BaseError, string>> Handle(
+        StartFFmpegSession request,
+        CancellationToken cancellationToken)
+    {
+        Either<BaseError, string> result;
+        try
+        {
+            result = await Validate(request)
+                .MapT(_ => StartProcess(request, cancellationToken))
+                // this weirdness is needed to maintain the error type (.ToEitherAsync() just gives BaseError)
 #pragma warning disable VSTHRD103
-            .Bind(v => v.ToEither().MapLeft(seq => seq.Head()).MapAsync<BaseError, Task<string>, string>(identity));
+                .Bind(v => v.ToEither().MapLeft(seq => seq.Head()).MapAsync<BaseError, Task<string>, string>(identity));
 #pragma warning restore VSTHRD103
+        }
+        catch
+        {
+            _ffmpegSegmenterService.RemoveReservation(request.ChannelNumber);
+            throw;
+        }
+
+        // a start that failed after reserving the channel must release the
+        // null reservation, or the channel is bricked until restart.
+        // ChannelSessionAlreadyActive is excluded: on that path the
+        // reservation is a CONCURRENT start's, and removing it would reopen
+        // the very race the atomic reservation closes.
+        foreach (BaseError error in result.LeftToSeq())
+        {
+            if (error is not ChannelSessionAlreadyActive)
+            {
+                _ffmpegSegmenterService.RemoveReservation(request.ChannelNumber);
+            }
+        }
+
+        return result;
+    }
 
     private async Task<string> StartProcess(StartFFmpegSession request, CancellationToken cancellationToken)
     {
@@ -96,16 +124,29 @@ public class StartFFmpegSessionHandler : IRequestHandler<StartFFmpegSession, Eit
 
         HlsSessionWorker worker = GetSessionWorker(request, targetFramerate);
 
-        _ffmpegSegmenterService.AddOrUpdateWorker(request.ChannelNumber, worker);
+        if (!_ffmpegSegmenterService.TryActivateWorker(request.ChannelNumber, worker))
+        {
+            // another start owns the channel; this worker never ran, so
+            // dispose it and hand the caller the playlist like any
+            // already-active request
+            ((IDisposable)worker).Dispose();
+            _logger.LogWarning(
+                "Channel {ChannelNumber} session was activated by a concurrent start; discarding this one",
+                request.ChannelNumber);
+            return await GetMultiVariantPlaylist(request);
+        }
 
         // fire and forget worker
         _ = worker.Run(request.ChannelNumber, idleTimeout, _hostApplicationLifetime.ApplicationStopping)
             .ContinueWith(
                 _ =>
                 {
-                    _ffmpegSegmenterService.RemoveWorker(request.ChannelNumber, out IHlsSessionWorker inactiveWorker);
+                    // remove and dispose only THIS worker: a dying worker
+                    // must never deregister or dispose a replacement that
+                    // now owns the channel
+                    _ffmpegSegmenterService.RemoveWorker(request.ChannelNumber, worker);
 
-                    inactiveWorker?.Dispose();
+                    ((IDisposable)worker).Dispose();
 
                     _workerChannel.TryWrite(new ReleaseMemory(false));
                 },
