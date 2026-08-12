@@ -35,7 +35,13 @@ public class YamlPlayoutCountHandler(EnumeratorCache enumeratorCache) : YamlPlay
             logger,
             cancellationToken);
 
-        Option<MediaItem> maybeSlate = ResolveSlate(count.Slate, maybeSlateEnumerator, logger);
+        // the enumerator was fetched to load the key (and to report it when it names nothing), but
+        // the slate itself is read from the content, never from that enumerator's cursor
+        Option<MediaItem> maybeSlate = ResolveSlate(
+            count.Slate,
+            maybeSlateEnumerator,
+            GetContentMediaItems(count.Slate),
+            logger);
 
         foreach (IMediaCollectionEnumerator enumerator in maybeEnumerator)
         {
@@ -59,13 +65,18 @@ public class YamlPlayoutCountHandler(EnumeratorCache enumeratorCache) : YamlPlay
     }
 
     /// <summary>
-    ///     Picks the single media item a slate content key stands for. The key is expected to name a
-    ///     one item list, so the enumerator's current item is the answer and it never advances: the
-    ///     same slate backs every item the instruction schedules.
+    ///     Picks the media item a slate content key stands for: the first item that key resolves to.
+    ///     The answer comes from the content, not from an enumerator's cursor, so it does not depend
+    ///     on how far the build has walked anything. Every window an instruction schedules gets the
+    ///     same slate, every templated window in a schedule gets the same slate from the same key,
+    ///     and naming one key as both content and slate leaves the two unrelated: the content walks,
+    ///     the slate stands still. The enumerator is read only for what kind of content the key
+    ///     names, and is never advanced.
     /// </summary>
     protected static Option<MediaItem> ResolveSlate(
         string slateContentKey,
         Option<IMediaCollectionEnumerator> maybeSlateEnumerator,
+        IReadOnlyList<MediaItem> slateItems,
         ILogger<SequentialPlayoutBuilder> logger)
     {
         if (string.IsNullOrWhiteSpace(slateContentKey))
@@ -75,7 +86,19 @@ public class YamlPlayoutCountHandler(EnumeratorCache enumeratorCache) : YamlPlay
 
         foreach (IMediaCollectionEnumerator slateEnumerator in maybeSlateEnumerator)
         {
-            if (slateEnumerator.Current.IsNone)
+            // a playlist or marathon is an order to walk rather than a list to pick from, and the
+            // items behind it are only reachable one cursor position at a time; a slate has to be
+            // the same item for every window, so say why this key cannot be one
+            if (slateEnumerator is PlaylistEnumerator)
+            {
+                logger.LogWarning(
+                    "Slate content with key {SlateContentKey} is a playlist or marathon, which cannot name a slate; no slate will be recorded",
+                    slateContentKey);
+
+                return Option<MediaItem>.None;
+            }
+
+            if (slateItems.Count is 0)
             {
                 logger.LogWarning(
                     "Slate content with key {SlateContentKey} contains no media items; no slate will be recorded",
@@ -84,7 +107,15 @@ public class YamlPlayoutCountHandler(EnumeratorCache enumeratorCache) : YamlPlay
                 return Option<MediaItem>.None;
             }
 
-            return slateEnumerator.Current;
+            if (slateItems.Count > 1)
+            {
+                logger.LogWarning(
+                    "Slate content with key {SlateContentKey} contains {MediaItemCount} media items; one window can only stand on one of them, so the first is used for all of them",
+                    slateContentKey,
+                    slateItems.Count);
+            }
+
+            return slateItems[0];
         }
 
         // a key that is not in the content list at all is already reported by GetContentEnumerator

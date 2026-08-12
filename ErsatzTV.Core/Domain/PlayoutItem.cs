@@ -79,8 +79,11 @@ public class PlayoutItem
         return new PlayoutItem
         {
             MediaItemId = MediaItemId,
+
+            // the id travels and the navigation does not, the same way MediaItem does not: a clone
+            // is written back to the database, and carrying a loaded entity into an insert is how
+            // the copy drags a tracked graph along with it
             SlateMediaItemId = SlateMediaItemId,
-            SlateMediaItem = SlateMediaItem,
             Start = Start,
             Finish = Finish,
             GuideStart = GuideStart,

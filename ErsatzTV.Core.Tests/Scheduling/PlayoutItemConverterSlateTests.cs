@@ -22,6 +22,8 @@ namespace ErsatzTV.Core.Tests.Scheduling;
 public class PlayoutItemConverterSlateTests
 {
     private const string SlatePath = "/bumps/fallback/WeatherSlateStatic.mp4";
+    private const string SlateImagePath = "/bumps/fallback/WeatherSlateStatic.png";
+    private const string SlateStreamUrl = "http://weather.example/national.ts";
     private const string TemplatedUrl = "http://weather.example/live.ts?zip={query:zip}";
 
     private static readonly DateTimeOffset Start = new(2026, 8, 11, 20, 20, 0, TimeSpan.FromHours(-4));
@@ -138,10 +140,127 @@ public class PlayoutItemConverterSlateTests
         }
     }
 
+    [Test]
+    public async Task Templated_Source_That_Was_Never_Probed_Should_Keep_Its_Source_Beside_The_Slate()
+    {
+        // a templated url cannot be opened without a viewer's query values, so the version behind it
+        // carries no streams at all. Reading that as "no audio" moved the item's own source out from
+        // under "source" and left the slate declared next to nothing
+        PlayoutItem playoutItem = TemplatedPlayoutItem(streams: []);
+        playoutItem.SlateMediaItemId = 2;
+        playoutItem.SlateMediaItem = SlateVideo(2);
+
+        Option<Core.Next.PlayoutItem> maybeNext = await Convert(playoutItem);
+
+        maybeNext.IsSome.ShouldBeTrue();
+
+        foreach (Core.Next.PlayoutItem next in maybeNext)
+        {
+            next.Source.ShouldNotBeNull();
+            next.Source.SourceType.ShouldBe(Core.Next.SourceType.Http);
+            next.Source.Uri.ShouldBe(TemplatedUrl);
+
+            next.Slate.ShouldNotBeNull();
+            next.Slate.Path.ShouldBe(SlatePath);
+
+            // and no silence stands in for audio nobody ever looked for; a cohort viewer is there
+            // for the live audio this would have replaced
+            next.Tracks.ShouldBeNull();
+
+            string json = JsonSerializer.Serialize(next, Core.Next.Converter.Settings);
+
+            using JsonDocument document = JsonDocument.Parse(json);
+            JsonElement root = document.RootElement;
+
+            root.TryGetProperty("source", out _).ShouldBeTrue();
+            root.TryGetProperty("slate", out _).ShouldBeTrue();
+            root.TryGetProperty("tracks", out _).ShouldBeFalse();
+        }
+    }
+
+    [Test]
+    public async Task Source_Probed_Without_Audio_Should_Still_Be_Given_Silence()
+    {
+        // a version that was probed and came back with video and nothing else really has no audio,
+        // and the silent track it gets is not what the empty stream list above was ever saying
+        PlayoutItem playoutItem = TemplatedPlayoutItem(streams: [VideoStream()]);
+        playoutItem.SlateMediaItemId = 2;
+        playoutItem.SlateMediaItem = SlateVideo(2);
+
+        Option<Core.Next.PlayoutItem> maybeNext = await Convert(playoutItem);
+
+        foreach (Core.Next.PlayoutItem next in maybeNext)
+        {
+            next.Tracks.ShouldNotBeNull();
+            next.Tracks.Audio.Source.SourceType.ShouldBe(Core.Next.SourceType.Lavfi);
+            next.Tracks.Video.Source.Uri.ShouldBe(TemplatedUrl);
+
+            next.Slate.ShouldNotBeNull();
+        }
+    }
+
+    [Test]
+    public async Task Image_Slate_Should_Declare_The_Container_That_Makes_It_A_Still()
+    {
+        // without this the worker reads a still on its video path, where one frame is one frame
+        PlayoutItem playoutItem = TemplatedPlayoutItem();
+        playoutItem.SlateMediaItemId = 3;
+        playoutItem.SlateMediaItem = SlateImage(3);
+
+        Option<Core.Next.PlayoutItem> maybeNext = await Convert(playoutItem);
+
+        maybeNext.IsSome.ShouldBeTrue();
+
+        foreach (Core.Next.PlayoutItem next in maybeNext)
+        {
+            next.Slate.ShouldNotBeNull();
+            next.Slate.Path.ShouldBe(SlateImagePath);
+            next.Slate.ProbeHint.FormatName.ShouldBe("image2");
+        }
+    }
+
+    [Test]
+    public async Task Remote_Stream_Slate_Should_Be_Emitted_As_Its_Url()
+    {
+        // a slate does not have to be a file: a stream with nothing templated about it is
+        // something a shared session can tune, which is the whole requirement
+        PlayoutItem playoutItem = TemplatedPlayoutItem();
+        playoutItem.SlateMediaItemId = 4;
+        playoutItem.SlateMediaItem = SlateStream(4);
+
+        Option<Core.Next.PlayoutItem> maybeNext = await Convert(playoutItem);
+
+        maybeNext.IsSome.ShouldBeTrue();
+
+        foreach (Core.Next.PlayoutItem next in maybeNext)
+        {
+            next.Slate.ShouldNotBeNull();
+            next.Slate.SourceType.ShouldBe(Core.Next.SourceType.Http);
+            next.Slate.Uri.ShouldBe(SlateStreamUrl);
+        }
+    }
+
+    [Test]
+    public async Task Video_Slate_Should_Declare_No_Container()
+    {
+        PlayoutItem playoutItem = TemplatedPlayoutItem();
+        playoutItem.SlateMediaItemId = 2;
+        playoutItem.SlateMediaItem = SlateVideo(2);
+
+        Option<Core.Next.PlayoutItem> maybeNext = await Convert(playoutItem);
+
+        foreach (Core.Next.PlayoutItem next in maybeNext)
+        {
+            // nothing in the database says what container this file is, and the worker's own
+            // default is the only honest answer
+            next.Slate.ProbeHint.FormatName.ShouldBeNull();
+        }
+    }
+
     private static Task<Option<Core.Next.PlayoutItem>> Convert(PlayoutItem playoutItem)
     {
         var fileSystem = new MockFileSystem();
-        fileSystem.Initialize().WithFile(SlatePath);
+        fileSystem.Initialize().WithFile(SlatePath).WithFile(SlateImagePath);
 
         var converter = new PlayoutItemConverter(
             fileSystem,
@@ -163,7 +282,7 @@ public class PlayoutItemConverterSlateTests
             CancellationToken.None);
     }
 
-    private static PlayoutItem TemplatedPlayoutItem() =>
+    private static PlayoutItem TemplatedPlayoutItem(List<MediaStream> streams = null) =>
         new()
         {
             Id = 77,
@@ -173,7 +292,7 @@ public class PlayoutItemConverterSlateTests
                 Id = 1,
                 Url = TemplatedUrl,
                 IsLive = true,
-                MediaVersions = [Version(TimeSpan.FromMinutes(103), path: null)]
+                MediaVersions = [Version(TimeSpan.FromMinutes(103), path: null, streams)]
             },
             Start = Start.UtcDateTime,
             Finish = Start.UtcDateTime + TimeSpan.FromMinutes(103),
@@ -188,7 +307,47 @@ public class PlayoutItemConverterSlateTests
             MediaVersions = [Version(TimeSpan.FromMinutes(5), SlatePath)]
         };
 
-    private static MediaVersion Version(TimeSpan duration, string path) =>
+    private static RemoteStream SlateStream(int id) =>
+        new()
+        {
+            Id = id,
+            Url = SlateStreamUrl,
+            IsLive = true,
+            MediaVersions = [Version(TimeSpan.FromMinutes(5), path: null)]
+        };
+
+    private static Image SlateImage(int id) =>
+        new()
+        {
+            Id = id,
+            MediaVersions =
+            [
+                Version(
+                    TimeSpan.FromSeconds(Image.DefaultSeconds),
+                    SlateImagePath,
+                    [
+                        new MediaStream
+                        {
+                            Index = 0,
+                            MediaStreamKind = MediaStreamKind.Video,
+                            Codec = "png",
+                            PixelFormat = "rgb24"
+                        }
+                    ])
+            ]
+        };
+
+    private static MediaStream VideoStream() =>
+        new()
+        {
+            Index = 0,
+            MediaStreamKind = MediaStreamKind.Video,
+            Codec = "h264",
+            Profile = "high",
+            PixelFormat = "yuv420p"
+        };
+
+    private static MediaVersion Version(TimeSpan duration, string path, List<MediaStream> streams = null) =>
         new()
         {
             Duration = duration,
@@ -200,16 +359,9 @@ public class PlayoutItemConverterSlateTests
             VideoScanKind = VideoScanKind.Progressive,
             Chapters = [],
             MediaFiles = path is null ? [] : [new MediaFile { Path = path }],
-            Streams =
+            Streams = streams ??
             [
-                new MediaStream
-                {
-                    Index = 0,
-                    MediaStreamKind = MediaStreamKind.Video,
-                    Codec = "h264",
-                    Profile = "high",
-                    PixelFormat = "yuv420p"
-                },
+                VideoStream(),
                 new MediaStream
                 {
                     Index = 1,

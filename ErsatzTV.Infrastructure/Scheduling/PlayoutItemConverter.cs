@@ -115,12 +115,19 @@ public class PlayoutItemConverter(
         {
             MediaVersion headVersion = playoutItem.MediaItem.GetHeadVersion();
 
-            nextPlayoutItem.Source!.ProbeHint = ProbeHintForVersion(headVersion);
+            nextPlayoutItem.Source!.ProbeHint = ProbeHintForVersion(playoutItem.MediaItem, headVersion);
 
             await AddSlate(playoutItem, nextPlayoutItem, cancellationToken);
 
             // if no audio streams, use lavfi to insert silence
-            if (headVersion.Streams.All(s => s.MediaStreamKind is not MediaStreamKind.Audio))
+            //
+            // no streams at all is not the same statement: it says the version was never probed,
+            // which is the normal state of a templated remote stream, since its url cannot be
+            // opened without a viewer's query values. Reading that as "no audio" replaces the live
+            // audio a cohort viewer tuned in for with silence, and moves the item's own source out
+            // from under "source", leaving a declared slate with nothing left to stand in for
+            if (headVersion.Streams is { Count: > 0 } &&
+                headVersion.Streams.All(s => s.MediaStreamKind is not MediaStreamKind.Audio))
             {
                 var videoSource = nextPlayoutItem.Source;
 
@@ -180,7 +187,7 @@ public class PlayoutItemConverter(
         return nextPlayoutItem;
     }
 
-    private static Core.Next.ProbeHint ProbeHintForVersion(MediaVersion version)
+    private static Core.Next.ProbeHint ProbeHintForVersion(MediaItem mediaItem, MediaVersion version)
     {
         List<MediaStream> streams = version.Streams ?? [];
 
@@ -224,9 +231,26 @@ public class PlayoutItemConverter(
             Audio = audioHints,
             Video = videoHints,
             Subtitle = subtitleHints,
-            DurationMs = (long)version.Duration.TotalMilliseconds
+            DurationMs = (long)version.Duration.TotalMilliseconds,
+            FormatName = FormatNameForItem(mediaItem, streams)
         };
     }
+
+    /// <summary>
+    ///     The container to declare. The database stores no container name, and this hint exists to
+    ///     answer one question without probing: whether the source is a still image, which the next
+    ///     engine decides from an image container holding a single image stream. A library image is
+    ///     that by definition, and its one video stream is the image, so the container it is opened
+    ///     through is an image container whichever demuxer ffprobe would have named (image2 for a
+    ///     jpeg, png_pipe for a png; the engine accepts either). Saying it puts a still on the image
+    ///     path, where the frame is looped and never seeked into. Everything else declares nothing
+    ///     and keeps the engine's own default, which is where a slate that is an image was landing
+    ///     until now: read as video, one frame long.
+    /// </summary>
+    private static string FormatNameForItem(MediaItem mediaItem, List<MediaStream> streams) =>
+        mediaItem is Image && streams is [{ MediaStreamKind: MediaStreamKind.Video }]
+            ? "image2"
+            : null;
 
     /// <summary>
     ///     Emits the item's slate, the source the shared session plays instead of tuning the item's
@@ -280,7 +304,9 @@ public class PlayoutItemConverter(
         Option<Core.Next.Source> maybeSlateSource = await SourceForItem(slateItem, cancellationToken);
         foreach (Core.Next.Source slateSource in maybeSlateSource)
         {
-            slateSource.ProbeHint = ProbeHintForVersion(playoutItem.SlateMediaItem.GetHeadVersion());
+            slateSource.ProbeHint = ProbeHintForVersion(
+                playoutItem.SlateMediaItem,
+                playoutItem.SlateMediaItem.GetHeadVersion());
             nextPlayoutItem.Slate = slateSource;
         }
     }

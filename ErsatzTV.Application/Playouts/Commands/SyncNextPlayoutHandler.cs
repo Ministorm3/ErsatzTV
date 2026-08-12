@@ -194,8 +194,10 @@ public partial class SyncNextPlayoutHandler(
             .ThenInclude(i => (i as RemoteStream).RemoteStreamMetadata)
             .ThenInclude(em => em.Subtitles)
 
-            // the slate only ever becomes a source with a path and a probe hint, so it needs its
-            // files and streams but none of the metadata that feeds track selection
+            // the slate only ever becomes a source with a path or a url and a probe hint, so it
+            // needs its files and streams but none of the metadata that feeds track selection.
+            // Every kind the converter can turn into a slate source is loaded here: a kind it
+            // accepts and this does not is a slate that goes missing without saying anything
             .Include(i => i.SlateMediaItem)
             .ThenInclude(mi => mi.LibraryPath)
             .ThenInclude(lp => lp.Library)
@@ -228,6 +230,12 @@ public partial class SyncNextPlayoutHandler(
             .ThenInclude(mv => mv.MediaFiles)
             .Include(i => i.SlateMediaItem)
             .ThenInclude(i => (i as MusicVideo).MediaVersions)
+            .ThenInclude(mv => mv.Streams)
+            .Include(i => i.SlateMediaItem)
+            .ThenInclude(i => (i as RemoteStream).MediaVersions)
+            .ThenInclude(mv => mv.MediaFiles)
+            .Include(i => i.SlateMediaItem)
+            .ThenInclude(i => (i as RemoteStream).MediaVersions)
             .ThenInclude(mv => mv.Streams)
             .AsSplitQuery()
             .ToListAsync(cancellationToken);
@@ -281,7 +289,7 @@ public partial class SyncNextPlayoutHandler(
                 targetFolder,
                 $"{first.StartOffset.ToUnixTimeMilliseconds()}_{last.FinishOffset.ToUnixTimeMilliseconds()}.json");
 
-            var playout = new Core.Next.Playout { Version = "https://ersatztv.org/playout/version/0.0.2", Items = [] };
+            var playout = new Core.Next.Playout { Items = [] };
             foreach (PlayoutItem playoutItem in group)
             {
                 Option<Core.Next.PlayoutItem> maybeNextPlayoutItem = await playoutItemConverter.ToNext(
@@ -298,6 +306,10 @@ public partial class SyncNextPlayoutHandler(
                     playout.Items.Add(nextPlayoutItem);
                 }
             }
+
+            // declared once the items are known, since what they carry is what a reader has to
+            // understand: a file with a slate in it must be refused by a worker that would drop it
+            playout.Version = Core.Next.PlayoutSchemaVersion.For(playout.Items);
 
             await fileSystem.File.WriteAllTextAsync(fileName, Core.Next.Serialize.ToJson(playout), cancellationToken);
         }

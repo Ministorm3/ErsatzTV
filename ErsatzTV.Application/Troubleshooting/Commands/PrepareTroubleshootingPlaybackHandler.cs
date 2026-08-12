@@ -363,7 +363,7 @@ public class PrepareTroubleshootingPlaybackHandler(
         {
             var playout = new Core.Next.Playout
             {
-                Version = "https://ersatztv.org/playout/version/0.0.2",
+                Version = Core.Next.PlayoutSchemaVersion.For([nextPlayoutItem]),
                 Items = [nextPlayoutItem]
             };
 

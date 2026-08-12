@@ -48,6 +48,16 @@ public abstract class YamlPlayoutContentHandler(EnumeratorCache enumeratorCache)
         return maybeEnumerator;
     }
 
+    /// <summary>
+    ///     The media items a content key resolves to, as loaded for that key's enumerator. Reading
+    ///     the content this way says nothing about how far any build has walked it, so an answer
+    ///     taken from here is the same answer every time, no matter what else scheduled from the
+    ///     same key first. Empty until <see cref="GetContentEnumerator" /> has loaded the key, and
+    ///     empty for playlist and marathon content, which is walked rather than listed.
+    /// </summary>
+    protected List<MediaItem> GetContentMediaItems(string contentKey) =>
+        string.IsNullOrWhiteSpace(contentKey) ? [] : enumeratorCache.MediaItemsForContent(contentKey);
+
     protected static List<PlayoutHistory> GetHistoryForItem(
         YamlPlayoutContext context,
         string contentKey,
