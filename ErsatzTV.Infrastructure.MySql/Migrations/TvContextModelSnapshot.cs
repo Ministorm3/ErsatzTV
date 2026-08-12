@@ -2104,6 +2104,9 @@ namespace ErsatzTV.Infrastructure.MySql.Migrations
                     b.Property<string>("SchedulingContext")
                         .HasColumnType("longtext");
 
+                    b.Property<int?>("SlateMediaItemId")
+                        .HasColumnType("int");
+
                     b.Property<DateTime>("Start")
                         .HasColumnType("datetime(6)");
 
@@ -2115,6 +2118,8 @@ namespace ErsatzTV.Infrastructure.MySql.Migrations
                     b.HasIndex("MediaItemId");
 
                     b.HasIndex("PlayoutId");
+
+                    b.HasIndex("SlateMediaItemId");
 
                     b.HasIndex("Start", "Finish")
                         .HasDatabaseName("IX_PlayoutItem_Start_Finish");
@@ -5266,9 +5271,16 @@ namespace ErsatzTV.Infrastructure.MySql.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("ErsatzTV.Core.Domain.MediaItem", "SlateMediaItem")
+                        .WithMany()
+                        .HasForeignKey("SlateMediaItemId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("MediaItem");
 
                     b.Navigation("Playout");
+
+                    b.Navigation("SlateMediaItem");
                 });
 
             modelBuilder.Entity("ErsatzTV.Core.Domain.PlayoutItemGraphicsElement", b =>

@@ -114,48 +114,10 @@ public class PlayoutItemConverter(
         if (playoutItem is not DynamicPlayoutItem)
         {
             MediaVersion headVersion = playoutItem.MediaItem.GetHeadVersion();
-            var sourceVideoHints = headVersion.Streams
-                .Where(s => s.MediaStreamKind is MediaStreamKind.Video)
-                .Select(s => new Core.Next.VideoHint
-                {
-                    StreamIndex = s.Index,
-                    Codec = s.Codec,
-                    Height = headVersion.Height,
-                    Width = headVersion.Width,
-                    Profile = s.Profile,
-                    FieldOrder = headVersion.VideoScanKind is VideoScanKind.Interlaced ? "tt" : "progressive",
-                    PixFmt = string.IsNullOrWhiteSpace(s.PixelFormat) ? PixelFormatForBitDepth(s.BitsPerRawSample) : s.PixelFormat,
-                    FrameRate = headVersion.RFrameRate,
-                    SampleAspectRatio = headVersion.SampleAspectRatio,
-                    DisplayAspectRatio = headVersion.DisplayAspectRatio,
-                    ColorPrimaries = s.ColorPrimaries,
-                    ColorRange = s.ColorRange,
-                    ColorSpace = s.ColorSpace,
-                    ColorTransfer = s.ColorTransfer
-                }).ToList();
-            var sourceAudioHints = headVersion.Streams
-                .Where(s => s.MediaStreamKind is MediaStreamKind.Audio)
-                .Select(s => new Core.Next.AudioHint
-                {
-                    StreamIndex = s.Index,
-                    Codec = s.Codec,
-                    Channels = s.Channels
-                }).ToList();
-            var sourceSubtitleHints = headVersion.Streams
-                .Where(s => s.MediaStreamKind is MediaStreamKind.Subtitle)
-                .Select(s => new Core.Next.SubtitleHint
-                {
-                    StreamIndex = s.Index,
-                    Codec = s.Codec
-                }).ToList();
 
-            nextPlayoutItem.Source!.ProbeHint = new Core.Next.ProbeHint
-            {
-                Audio = sourceAudioHints,
-                Video = sourceVideoHints,
-                Subtitle = sourceSubtitleHints,
-                DurationMs = (long)headVersion.Duration.TotalMilliseconds
-            };
+            nextPlayoutItem.Source!.ProbeHint = ProbeHintForVersion(headVersion);
+
+            await AddSlate(playoutItem, nextPlayoutItem, cancellationToken);
 
             // if no audio streams, use lavfi to insert silence
             if (headVersion.Streams.All(s => s.MediaStreamKind is not MediaStreamKind.Audio))
@@ -216,6 +178,111 @@ public class PlayoutItemConverter(
         }
 
         return nextPlayoutItem;
+    }
+
+    private static Core.Next.ProbeHint ProbeHintForVersion(MediaVersion version)
+    {
+        List<MediaStream> streams = version.Streams ?? [];
+
+        var videoHints = streams
+            .Where(s => s.MediaStreamKind is MediaStreamKind.Video)
+            .Select(s => new Core.Next.VideoHint
+            {
+                StreamIndex = s.Index,
+                Codec = s.Codec,
+                Height = version.Height,
+                Width = version.Width,
+                Profile = s.Profile,
+                FieldOrder = version.VideoScanKind is VideoScanKind.Interlaced ? "tt" : "progressive",
+                PixFmt = string.IsNullOrWhiteSpace(s.PixelFormat) ? PixelFormatForBitDepth(s.BitsPerRawSample) : s.PixelFormat,
+                FrameRate = version.RFrameRate,
+                SampleAspectRatio = version.SampleAspectRatio,
+                DisplayAspectRatio = version.DisplayAspectRatio,
+                ColorPrimaries = s.ColorPrimaries,
+                ColorRange = s.ColorRange,
+                ColorSpace = s.ColorSpace,
+                ColorTransfer = s.ColorTransfer
+            }).ToList();
+        var audioHints = streams
+            .Where(s => s.MediaStreamKind is MediaStreamKind.Audio)
+            .Select(s => new Core.Next.AudioHint
+            {
+                StreamIndex = s.Index,
+                Codec = s.Codec,
+                Channels = s.Channels
+            }).ToList();
+        var subtitleHints = streams
+            .Where(s => s.MediaStreamKind is MediaStreamKind.Subtitle)
+            .Select(s => new Core.Next.SubtitleHint
+            {
+                StreamIndex = s.Index,
+                Codec = s.Codec
+            }).ToList();
+
+        return new Core.Next.ProbeHint
+        {
+            Audio = audioHints,
+            Video = videoHints,
+            Subtitle = subtitleHints,
+            DurationMs = (long)version.Duration.TotalMilliseconds
+        };
+    }
+
+    /// <summary>
+    ///     Emits the item's slate, the source the shared session plays instead of tuning the item's
+    ///     own source. It is built exactly the way the item's own source is built, so a local slate
+    ///     carries its path and the probe hint the database already knows. It deliberately carries no
+    ///     in or out points: those belong to the scheduled content, not to the thing standing in for
+    ///     it on the shared session.
+    /// </summary>
+    private async Task AddSlate(
+        PlayoutItem playoutItem,
+        Core.Next.PlayoutItem nextPlayoutItem,
+        CancellationToken cancellationToken)
+    {
+        // a non-null id with a null navigation means the query did not ask for the slate, which is
+        // not the same as having no slate; there is nothing to emit either way
+        if (playoutItem.SlateMediaItemId is null || playoutItem.SlateMediaItem is null)
+        {
+            return;
+        }
+
+        // the slate is only ever a stand-in on the shared session, so a slate that cannot be turned
+        // into a source is dropped rather than allowed to take the whole item off the air
+        List<MediaVersion> slateVersions = playoutItem.SlateMediaItem switch
+        {
+            Episode episode => episode.MediaVersions,
+            Image image => image.MediaVersions,
+            Movie movie => movie.MediaVersions,
+            MusicVideo musicVideo => musicVideo.MediaVersions,
+            OtherVideo otherVideo => otherVideo.MediaVersions,
+            RemoteStream remoteStream => remoteStream.MediaVersions,
+            _ => null
+        };
+
+        if (slateVersions is not { Count: > 0 })
+        {
+            return;
+        }
+
+        // everything but a remote stream is resolved from its file on disk
+        if (playoutItem.SlateMediaItem is not RemoteStream && slateVersions[0].MediaFiles is not { Count: > 0 })
+        {
+            return;
+        }
+
+        var slateItem = new PlayoutItem
+        {
+            MediaItemId = playoutItem.SlateMediaItemId.Value,
+            MediaItem = playoutItem.SlateMediaItem
+        };
+
+        Option<Core.Next.Source> maybeSlateSource = await SourceForItem(slateItem, cancellationToken);
+        foreach (Core.Next.Source slateSource in maybeSlateSource)
+        {
+            slateSource.ProbeHint = ProbeHintForVersion(playoutItem.SlateMediaItem.GetHeadVersion());
+            nextPlayoutItem.Slate = slateSource;
+        }
     }
 
     private static string PixelFormatForBitDepth(int bitDepth)

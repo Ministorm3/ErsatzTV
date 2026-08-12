@@ -10,6 +10,21 @@ public class PlayoutItem
     public int Id { get; set; }
     public int MediaItemId { get; set; }
     public MediaItem MediaItem { get; set; }
+
+    /// <summary>
+    ///     Media item the shared next session plays instead of tuning this item's own source, for the
+    ///     length of this item's window. Purely a source substitution: it never changes what this item
+    ///     is, so <see cref="MediaItemId" /> and the timing still describe the scheduled content, and
+    ///     cohort viewers still reach the real source through variant sessions.
+    /// </summary>
+    public int? SlateMediaItemId { get; set; }
+
+    /// <summary>
+    ///     Navigation for <see cref="SlateMediaItemId" />. Only populated by queries that ask for it,
+    ///     so a null navigation with a non-null id means "not loaded", not "no slate".
+    /// </summary>
+    public MediaItem SlateMediaItem { get; set; }
+
     public DateTime Start { get; set; }
     public DateTime Finish { get; set; }
     public DateTime? GuideStart { get; set; }
@@ -64,6 +79,8 @@ public class PlayoutItem
         return new PlayoutItem
         {
             MediaItemId = MediaItemId,
+            SlateMediaItemId = SlateMediaItemId,
+            SlateMediaItem = SlateMediaItem,
             Start = Start,
             Finish = Finish,
             GuideStart = GuideStart,
@@ -110,6 +127,8 @@ public class PlayoutItem
         {
             MediaItemId = MediaItemId,
             MediaItem = MediaItem,
+            SlateMediaItemId = SlateMediaItemId,
+            SlateMediaItem = SlateMediaItem,
             Start = Start,
             Finish = Start + chapter.EndTime - chapter.StartTime,
             GuideFinish = GuideFinish,

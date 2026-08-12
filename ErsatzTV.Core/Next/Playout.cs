@@ -78,6 +78,19 @@ namespace ErsatzTV.Core.Next
         public Source? Source { get; set; }
 
         /// <summary>
+        /// The source the shared session plays instead of tuning `source`, for the length of this
+        /// item's window. Omit for no slate.
+        ///
+        /// This is a source substitution, never a replacement of the item: the item keeps its own
+        /// `source` and identity, so cohort viewers still get the live presentation through variant
+        /// sessions, which only works because the templated url is still here. In practice the slate
+        /// is a local file with a `probe_hint`.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("slate")]
+        public Source? Slate { get; set; }
+
+        /// <summary>
         /// RFC3339 formatted start time, e.g. 2026-04-13T00:24:21.527-05:00.
         /// </summary>
         [JsonPropertyName("start")]

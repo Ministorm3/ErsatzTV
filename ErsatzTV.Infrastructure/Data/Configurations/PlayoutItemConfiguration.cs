@@ -19,6 +19,13 @@ public class PlayoutItemConfiguration : IEntityTypeConfiguration<PlayoutItem>
             .HasForeignKey(pi => pi.MediaItemId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        // a slate is a source substitution for the shared session, not the item's content, so
+        // losing the slate media item must not take the scheduled item off the air with it
+        builder.HasOne(pi => pi.SlateMediaItem)
+            .WithMany()
+            .HasForeignKey(pi => pi.SlateMediaItemId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         builder.HasMany(c => c.Watermarks)
             .WithMany(m => m.PlayoutItems)
             .UsingEntity<PlayoutItemWatermark>(
