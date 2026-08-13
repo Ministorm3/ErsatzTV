@@ -28,6 +28,18 @@ public static class VariantRequests
     private static readonly TimeSpan PlaylistFreshness = TimeSpan.FromSeconds(15);
 
     /// <summary>
+    ///     How long a cohort's first playlist request waits for the worker to publish a composed
+    ///     playlist before giving up and serving shared. Three worker ticks.
+    /// </summary>
+    private static readonly TimeSpan ComposedPlaylistWait = TimeSpan.FromSeconds(6);
+
+    /// <summary>
+    ///     How often that wait re-checks. Short relative to the worker's own tick, so the playlist
+    ///     is served promptly once it lands rather than on a grid of our own.
+    /// </summary>
+    private static readonly TimeSpan ComposedPlaylistPoll = TimeSpan.FromMilliseconds(200);
+
+    /// <summary>
     ///     A short, deterministic, filesystem-safe name for an arbitrary string (fnv-1a), so a name
     ///     never has to carry query syntax onto the filesystem.
     /// </summary>
@@ -107,6 +119,117 @@ public static class VariantRequests
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return Option<string>.None;
+        }
+    }
+
+    /// <summary>
+    ///     What the worker has said about a raw query, keeping apart the two cases
+    ///     <see cref="ReadAnswer" /> deliberately collapses.
+    /// </summary>
+    /// <remarks>
+    ///     A caller that falls straight through to shared content cannot tell "the worker has not
+    ///     looked at this yet" from "the worker looked and this query names no cohort", and those
+    ///     need opposite handling. The first is a viewer about to be given a composed playlist,
+    ///     who must not be handed the shared one meanwhile: the two sit about eleven media
+    ///     sequences apart, so switching between them moves a client backwards. The second is a
+    ///     viewer whose content is shared, permanently, with nothing to wait for.
+    /// </remarks>
+    public abstract record CohortAnswer
+    {
+        /// <summary>No answer file: the worker has not completed a tick since the request.</summary>
+        public sealed record Pending : CohortAnswer;
+
+        /// <summary>The worker answered, and this query identifies no cohort.</summary>
+        public sealed record NoCohort : CohortAnswer;
+
+        /// <summary>The cohort folder name this query resolves to.</summary>
+        public sealed record Cohort(string Name) : CohortAnswer;
+    }
+
+    /// <summary>
+    ///     The worker's answer for a raw query, with Pending kept separate.
+    /// </summary>
+    public static async Task<CohortAnswer> ReadAnswerDetailed(
+        string outputFolder,
+        string rawQuery,
+        CancellationToken cancellationToken)
+    {
+        string path = Path.Combine(outputFolder, VariantsFolder, AnswersFolder, StableName(rawQuery));
+
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return new CohortAnswer.Pending();
+            }
+
+            string answer = (await File.ReadAllTextAsync(path, cancellationToken)).Trim();
+            return string.IsNullOrEmpty(answer)
+                ? new CohortAnswer.NoCohort()
+                : new CohortAnswer.Cohort(answer);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // unreadable is not the same as answered; let the caller wait it out
+            return new CohortAnswer.Pending();
+        }
+    }
+
+    /// <summary>
+    ///     Reads the composed playlist for a raw query, waiting out the worker's next tick rather
+    ///     than falling through to shared while the answer is still pending.
+    /// </summary>
+    /// <remarks>
+    ///     A cohort session is reaped when its viewer stops watching, and the reap deletes the
+    ///     composed playlist. So on every fresh tune the file is missing, and without this wait the
+    ///     viewer is handed the SHARED playlist, plays from it, and is then moved onto the composed
+    ///     playlist about eleven media sequences further back. Measured on channel 11 on
+    ///     2026-08-13: media sequence 7632 served twice, then 7622, the two playlists' newest
+    ///     segments 40s apart. The client's position is not in the new playlist at all, so it
+    ///     stalls and re-syncs backwards, which is the stutter and repeat viewers see on every
+    ///     channel change.
+    ///     Bounded at three worker ticks so the previous behaviour is still reached, just later: a
+    ///     channel whose own worker is starting, or a variant loop that has stopped, degrades to
+    ///     shared rather than hanging.
+    /// </remarks>
+    public static async Task<Option<string>> AwaitComposedPlaylist(
+        string outputFolder,
+        string rawQuery,
+        bool subtitles,
+        CancellationToken cancellationToken)
+    {
+        DateTime deadline = DateTime.UtcNow + ComposedPlaylistWait;
+
+        while (true)
+        {
+            switch (await ReadAnswerDetailed(outputFolder, rawQuery, cancellationToken))
+            {
+                // the worker looked and this query names no cohort; shared is the answer and
+                // there is nothing to wait for
+                case CohortAnswer.NoCohort:
+                    return Option<string>.None;
+
+                case CohortAnswer.Cohort cohort:
+                    Option<string> maybePlaylist = await ReadComposedPlaylist(
+                        outputFolder,
+                        cohort.Name,
+                        subtitles,
+                        cancellationToken);
+
+                    foreach (string playlist in maybePlaylist)
+                    {
+                        return playlist;
+                    }
+
+                    break;
+            }
+
+            if (DateTime.UtcNow >= deadline || cancellationToken.IsCancellationRequested)
+            {
+                return Option<string>.None;
+            }
+
+            await Task.Delay(ComposedPlaylistPoll, cancellationToken);
         }
     }
 

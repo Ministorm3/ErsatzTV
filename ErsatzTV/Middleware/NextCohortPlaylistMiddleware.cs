@@ -10,7 +10,8 @@ namespace ErsatzTV.Middleware;
 ///     A next channel's media playlist is a file in the transcode folder, served by static file
 ///     middleware. That runs before endpoint routing, so a controller could never answer these
 ///     requests; this has to be registered ahead of it instead.
-///     Everything this does is publish the query, read the answer, and serve the named file. The
+///     Everything this does is publish the query, wait out the worker's answer, and serve the
+///     named file. The
 ///     worker resolves the cohort, spawns its transcode and composes its playlist, because which
 ///     parameters identify a cohort depends on the playout the worker is currently running. Any
 ///     miss falls through to the shared playlist, so the stream is never worse than it would have
@@ -39,25 +40,21 @@ public static class NextCohortPlaylistMiddleware
                         request.Query,
                         context.RequestAborted);
 
-                    Option<string> maybeCohort = await VariantRequests.ReadAnswer(
+                    // waits out the worker's next tick rather than falling through to shared
+                    // while the answer is still pending: a fresh tune always finds the composed
+                    // playlist missing, because reaping the cohort deleted it, and serving shared
+                    // in the meantime moves the client backwards when the composed one arrives
+                    Option<string> maybePlaylist = await VariantRequests.AwaitComposedPlaylist(
                         outputFolder,
                         request.Query,
+                        request.Subtitles,
                         context.RequestAborted);
 
-                    foreach (string cohort in maybeCohort)
+                    foreach (string playlist in maybePlaylist)
                     {
-                        Option<string> maybePlaylist = await VariantRequests.ReadComposedPlaylist(
-                            outputFolder,
-                            cohort,
-                            request.Subtitles,
-                            context.RequestAborted);
-
-                        foreach (string playlist in maybePlaylist)
-                        {
-                            context.Response.ContentType = "application/vnd.apple.mpegurl";
-                            await context.Response.WriteAsync(playlist, context.RequestAborted);
-                            return;
-                        }
+                        context.Response.ContentType = "application/vnd.apple.mpegurl";
+                        await context.Response.WriteAsync(playlist, context.RequestAborted);
+                        return;
                     }
                 }
 

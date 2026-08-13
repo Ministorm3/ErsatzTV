@@ -149,4 +149,70 @@ public class VariantRequestsTests
         Directory.CreateDirectory(folder);
         await File.WriteAllTextAsync(Path.Combine(folder, VariantRequests.StableName(rawQuery)), answer);
     }
+
+    [Test]
+    public async Task ReadAnswerDetailed_ShouldSeparatePendingFromNoCohort()
+    {
+        (await VariantRequests.ReadAnswerDetailed(_folder, "zip=15216", CancellationToken.None))
+            .ShouldBeOfType<VariantRequests.CohortAnswer.Pending>();
+
+        await WriteAnswer("zip=15216", string.Empty);
+        (await VariantRequests.ReadAnswerDetailed(_folder, "zip=15216", CancellationToken.None))
+            .ShouldBeOfType<VariantRequests.CohortAnswer.NoCohort>();
+
+        await WriteAnswer("zip=15216", "58e211ca5cd2ba5a");
+        var answer = await VariantRequests.ReadAnswerDetailed(_folder, "zip=15216", CancellationToken.None);
+        answer.ShouldBeOfType<VariantRequests.CohortAnswer.Cohort>()
+            .Name.ShouldBe("58e211ca5cd2ba5a");
+    }
+
+    /// <summary>
+    ///     The defect this guards: a fresh tune finds no composed playlist, because the reap
+    ///     deleted it, and is handed the shared playlist. The two sit about eleven media sequences
+    ///     apart, so the client is then moved backwards and replays what it already showed. The
+    ///     request has to wait out the worker's next tick instead.
+    /// </summary>
+    [Test]
+    public async Task AwaitComposedPlaylist_ShouldWaitForTheWorker_RatherThanServingShared()
+    {
+        Task worker = Task.Run(
+            async () =>
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(400));
+                await WriteAnswer("zip=15216", "abc123");
+                await File.WriteAllTextAsync(
+                    Path.Combine(_folder, VariantRequests.ComposedPlaylistName("abc123", false)),
+                    "#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:7622\n");
+            });
+
+        Option<string> served = await VariantRequests.AwaitComposedPlaylist(
+            _folder,
+            "zip=15216",
+            false,
+            CancellationToken.None);
+
+        await worker;
+
+        served.IfNone(string.Empty).ShouldBe(
+            "#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:7622\n",
+            "a request arriving before the worker's tick must be served the composed playlist, never shared");
+    }
+
+    [Test]
+    public async Task AwaitComposedPlaylist_ShouldNotWait_WhenTheQueryNamesNoCohort()
+    {
+        await WriteAnswer("cachebust=1", string.Empty);
+
+        DateTime start = DateTime.UtcNow;
+        Option<string> served = await VariantRequests.AwaitComposedPlaylist(
+            _folder,
+            "cachebust=1",
+            false,
+            CancellationToken.None);
+
+        served.IsNone.ShouldBeTrue();
+        (DateTime.UtcNow - start).ShouldBeLessThan(
+            TimeSpan.FromSeconds(1),
+            "shared is the answer here and must be served at once");
+    }
 }
