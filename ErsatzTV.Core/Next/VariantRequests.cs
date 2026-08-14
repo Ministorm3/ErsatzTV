@@ -40,6 +40,14 @@ public static class VariantRequests
     private static readonly TimeSpan ComposedPlaylistPoll = TimeSpan.FromMilliseconds(200);
 
     /// <summary>
+    ///     How many segments a composed playlist needs before it is worth serving. Matches
+    ///     MIN_SEGMENTS in the worker's crates/ersatztv-channel/src/playlist_manager.rs, which is
+    ///     the same judgement made for the shared session: fewer than this gives a player nothing
+    ///     to buffer and it stalls immediately.
+    /// </summary>
+    private const int MinimumSegments = 4;
+
+    /// <summary>
     ///     A short, deterministic, filesystem-safe name for an arbitrary string (fnv-1a), so a name
     ///     never has to carry query syntax onto the filesystem.
     /// </summary>
@@ -214,6 +222,9 @@ public static class VariantRequests
     {
         DateTime deadline = DateTime.UtcNow + ComposedPlaylistWait;
 
+        // the shortest playlist seen so far, kept for the deadline case below
+        Option<string> tooShort = Option<string>.None;
+
         while (true)
         {
             switch (await ReadAnswerDetailed(outputFolder, rawQuery, cancellationToken))
@@ -232,7 +243,19 @@ public static class VariantRequests
 
                     foreach (string playlist in maybePlaylist)
                     {
-                        return playlist;
+                        // a composed playlist exists from the moment its session does, and the
+                        // worker publishes it every tick whether or not anything is composed
+                        // into it yet, with no minimum of its own. So the file appearing is not
+                        // the same as it being playable: a cohort tuning in between its session
+                        // being created and its first entry landing gets headers and nothing
+                        // else. Wait for a window worth having, exactly as the shared session's
+                        // own readiness gate does
+                        if (SegmentCount(playlist) >= MinimumSegments)
+                        {
+                            return playlist;
+                        }
+
+                        tooShort = playlist;
                     }
 
                     break;
@@ -240,12 +263,25 @@ public static class VariantRequests
 
             if (DateTime.UtcNow >= deadline || cancellationToken.IsCancellationRequested)
             {
-                return Option<string>.None;
+                // the cohort is real and its playlist is present, just still short. Serving it
+                // beats falling through to shared, which is what moves a client backwards when
+                // the composed playlist arrives a moment later
+                return tooShort;
             }
 
             await Task.Delay(ComposedPlaylistPoll, cancellationToken);
         }
     }
+
+    /// <summary>
+    ///     Segments in a playlist: the lines that are not tags. A composed playlist always
+    ///     carries its headers, so counting lines or checking for content would both call an
+    ///     empty playlist playable.
+    /// </summary>
+    private static int SegmentCount(string playlist) =>
+        playlist
+            .Split('\n')
+            .Count(line => line.Length > 0 && !line.StartsWith('#') && !line.All(char.IsWhiteSpace));
 
     /// <summary>
     ///     Reads a cohort's composed playlist, but only while its worker is still republishing it.

@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using ErsatzTV.Core.Next;
 using NUnit.Framework;
 using Shouldly;
@@ -254,9 +256,25 @@ public class VariantRequestsTests
     ///     apart, so the client is then moved backwards and replays what it already showed. The
     ///     request has to wait out the worker's next tick instead.
     /// </summary>
+    /// <summary>
+    ///     A composed playlist with the given number of segments, which is what the worker
+    ///     publishes once it has actually composed something.
+    /// </summary>
+    private static string ComposedPlaylist(int segments)
+    {
+        var playlist = new StringBuilder("#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:7622\n");
+        for (var i = 0; i < segments; i++)
+        {
+            playlist.Append("#EXTINF:4.000000,\n").Append(CultureInfo.InvariantCulture, $"live{i:D6}.ts\n");
+        }
+
+        return playlist.ToString();
+    }
+
     [Test]
     public async Task AwaitComposedPlaylist_ShouldWaitForTheWorker_RatherThanServingShared()
     {
+        string composed = ComposedPlaylist(10);
         Task worker = Task.Run(
             async () =>
             {
@@ -264,7 +282,7 @@ public class VariantRequestsTests
                 await WriteAnswer("zip=15216", "abc123");
                 await File.WriteAllTextAsync(
                     Path.Combine(_folder, VariantRequests.ComposedPlaylistName("abc123", false)),
-                    "#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:7622\n");
+                    composed);
             });
 
         Option<string> served = await VariantRequests.AwaitComposedPlaylist(
@@ -276,8 +294,70 @@ public class VariantRequestsTests
         await worker;
 
         served.IfNone(string.Empty).ShouldBe(
-            "#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:7622\n",
+            composed,
             "a request arriving before the worker's tick must be served the composed playlist, never shared");
+    }
+
+    /// <summary>
+    ///     The composed playlist exists from the moment its session does, and the worker
+    ///     republishes it every tick whether or not anything has been composed into it, with no
+    ///     minimum of its own. So the file appearing is not the same as it being playable: a
+    ///     cohort tuning in between its session being created and its first entry landing would
+    ///     otherwise be handed headers and no segments, and stall on them.
+    /// </summary>
+    [Test]
+    public async Task AwaitComposedPlaylist_ShouldWaitForSegments_NotJustTheFile()
+    {
+        string full = ComposedPlaylist(10);
+        await WriteAnswer("zip=15216", "abc123");
+        string path = Path.Combine(_folder, VariantRequests.ComposedPlaylistName("abc123", false));
+
+        // the session exists and is publishing, but has composed nothing yet
+        await File.WriteAllTextAsync(path, ComposedPlaylist(0));
+
+        Task worker = Task.Run(
+            async () =>
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(500));
+                await File.WriteAllTextAsync(path, full);
+            });
+
+        Option<string> served = await VariantRequests.AwaitComposedPlaylist(
+            _folder,
+            "zip=15216",
+            false,
+            CancellationToken.None);
+
+        await worker;
+
+        served.IfNone(string.Empty).ShouldBe(
+            full,
+            "an empty composed playlist is not playable; the request must wait for segments");
+    }
+
+    /// <summary>
+    ///     If the wait runs out with the playlist still short, serve it anyway. The cohort is real
+    ///     and its playlist is present, so falling back to shared here would reintroduce exactly
+    ///     the backwards jump the wait exists to prevent.
+    /// </summary>
+    [Test]
+    public async Task AwaitComposedPlaylist_ShouldServeAShortPlaylist_RatherThanFallingBackToShared()
+    {
+        string short2 = ComposedPlaylist(2);
+        await WriteAnswer("zip=15216", "abc123");
+        await File.WriteAllTextAsync(
+            Path.Combine(_folder, VariantRequests.ComposedPlaylistName("abc123", false)),
+            short2);
+
+        Option<string> served = await VariantRequests.AwaitComposedPlaylist(
+            _folder,
+            "zip=15216",
+            false,
+            CancellationToken.None);
+
+        served.IfNone(string.Empty).ShouldBe(
+            short2,
+            "a short composed playlist still beats shared, which moves the client backwards");
     }
 
     [Test]
