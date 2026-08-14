@@ -83,10 +83,24 @@ public static class VariantRequests
         {
             string folder = Path.Combine(outputFolder, VariantsFolder, RequestsFolder);
             Directory.CreateDirectory(folder);
-            await File.WriteAllTextAsync(
-                Path.Combine(folder, StableName(rawQuery)),
-                rawQuery,
-                cancellationToken);
+
+            // Published by rename, never by truncating the live file.
+            //
+            // File.WriteAllTextAsync truncates, so between the open and the write the request
+            // is present, carries a fresh modified time, and is EMPTY. A worker scanning the
+            // folder in that window reads an empty query, canonicalizes it to the default
+            // cohort, and reaps the session belonging to the cohort the viewer actually asked
+            // for. The fresh modified time means it is not reported as a stale request either.
+            //
+            // That happened three times over 2026-08-13/14 on a channel being polled every two
+            // seconds, each time recovering on the next tick, and once it cost an item its
+            // variant when the respawn raced the reaped session's exiting worker for the
+            // output folder lock. File.Move with overwrite is rename(2) on Linux, so a reader
+            // sees either the previous request or the new one and never a partial file.
+            string path = Path.Combine(folder, StableName(rawQuery));
+            string temporary = path + ".tmp";
+            await File.WriteAllTextAsync(temporary, rawQuery, cancellationToken);
+            File.Move(temporary, path, true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

@@ -70,6 +70,88 @@ public class VariantRequestsTests
         (await File.ReadAllTextAsync(path)).ShouldBe("Zip=15216&access_token=abc");
     }
 
+    /// <summary>
+    ///     Republishing must never leave the request empty, even for an instant. A truncating
+    ///     write does: between the open and the write the file is present, freshly modified and
+    ///     empty, and a worker scanning the folder in that window reads an empty query,
+    ///     canonicalizes it to the default cohort, and reaps the session of the cohort the viewer
+    ///     actually asked for. That fired three times over 2026-08-13/14 while a viewer polled
+    ///     every two seconds, and once cost an item its variant when the respawn raced the reaped
+    ///     session's exiting worker for the output folder lock.
+    ///     The rename cannot be observed mid-flight from a test, so this pins what it leaves
+    ///     behind: the request holds the new query and no temporary file survives beside it.
+    /// </summary>
+    [Test]
+    public async Task PublishRequest_ShouldRepublishWithoutLeavingATemporaryFile()
+    {
+        string requests = Path.Combine(_folder, "variants", ".requests");
+
+        await VariantRequests.PublishRequest(_folder, "zip=15216", CancellationToken.None);
+        await VariantRequests.PublishRequest(_folder, "zip=15216", CancellationToken.None);
+
+        string path = Path.Combine(requests, VariantRequests.StableName("zip=15216"));
+        (await File.ReadAllTextAsync(path)).ShouldBe("zip=15216");
+
+        // a leftover temporary would be scanned as a request of its own, and its name would not
+        // hash from its contents, so the worker would treat every tick as a torn read
+        Directory.GetFiles(requests).ShouldBe([path]);
+    }
+
+    /// <summary>
+    ///     A reader must never observe the request empty while it is being republished, which is
+    ///     the whole point of publishing by rename. This is the reap bug reproduced in miniature:
+    ///     the worker is exactly such a reader, scanning the folder every two seconds, and an
+    ///     empty read makes it reap the session of a cohort whose viewer is still watching.
+    ///     A truncating write fails this reliably within a few hundred republishes; a rename
+    ///     cannot fail it at all, because the reader sees either the old file or the new one.
+    /// </summary>
+    [Test]
+    public async Task PublishRequest_ShouldNeverBeObservedEmptyWhileRepublishing()
+    {
+        const string RawQuery = "zip=15216";
+        string path = Path.Combine(
+            _folder,
+            "variants",
+            ".requests",
+            VariantRequests.StableName(RawQuery));
+
+        await VariantRequests.PublishRequest(_folder, RawQuery, CancellationToken.None);
+
+        using var done = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var emptyReads = 0;
+
+        Task reader = Task.Run(
+            async () =>
+            {
+                while (!done.IsCancellationRequested)
+                {
+                    try
+                    {
+                        if (File.Exists(path) && (await File.ReadAllTextAsync(path)).Length == 0)
+                        {
+                            Interlocked.Increment(ref emptyReads);
+                        }
+                    }
+                    catch (IOException)
+                    {
+                        // a locked file is not an empty one; the worker skips and retries
+                    }
+                }
+            },
+            CancellationToken.None);
+
+        for (var i = 0; i < 400 && !done.IsCancellationRequested; i++)
+        {
+            await VariantRequests.PublishRequest(_folder, RawQuery, CancellationToken.None);
+        }
+
+        await done.CancelAsync();
+        await reader;
+
+        emptyReads.ShouldBe(0, "a republished request was observed empty, so a worker scanning " +
+            "in that window would reap the cohort whose viewer is still watching");
+    }
+
     [Test]
     public async Task ReadAnswer_ShouldBeNone_WhenTheWorkerHasNotAnswered()
     {
