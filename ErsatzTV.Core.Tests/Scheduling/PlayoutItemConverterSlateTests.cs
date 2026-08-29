@@ -4,6 +4,7 @@ using ErsatzTV.Core.Interfaces.Emby;
 using ErsatzTV.Core.Interfaces.FFmpeg;
 using ErsatzTV.Core.Interfaces.Jellyfin;
 using ErsatzTV.Core.Interfaces.Plex;
+using ErsatzTV.Core.Interfaces.Streaming;
 using ErsatzTV.Infrastructure.Data;
 using ErsatzTV.Infrastructure.Scheduling;
 using Microsoft.EntityFrameworkCore;
@@ -270,6 +271,8 @@ public class PlayoutItemConverterSlateTests
             Substitute.For<ICustomStreamSelector>(),
             Substitute.For<IFFmpegStreamSelector>(),
             Substitute.For<IWatermarkSelector>(),
+            Substitute.For<IGraphicsElementSelector>(),
+            Substitute.For<IGraphicsElementLoader>(),
             Substitute.For<IDbContextFactory<TvContext>>());
 
         return converter.ToNext(

@@ -1,4 +1,4 @@
-using System.IO.Abstractions;
+﻿using System.IO.Abstractions;
 using System.Threading.Channels;
 using ErsatzTV.Application;
 using ErsatzTV.Application.MediaItems;
@@ -9,6 +9,7 @@ using ErsatzTV.Core.Domain;
 using ErsatzTV.Core.Interfaces.FFmpeg;
 using ErsatzTV.Core.Interfaces.Repositories;
 using ErsatzTV.Core.Interfaces.Troubleshooting;
+using ErsatzTV.Filters;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
 using Serilog.Context;
@@ -16,6 +17,7 @@ using Serilog.Context;
 namespace ErsatzTV.Controllers.Api;
 
 [ApiController]
+[ServiceFilter(typeof(ConditionalUiAuthorizeFilter))]
 public class TroubleshootController(
     ChannelWriter<IFFmpegWorkerRequest> channelWriter,
     IFileSystem fileSystem,
@@ -56,11 +58,6 @@ public class TroubleshootController(
         try
         {
             Option<int> ss = seekSeconds > 0 ? seekSeconds : Option<int>.None;
-
-            if (streamingEngine is StreamingEngine.Next && watermark.Count > 1)
-            {
-                watermark = [watermark.Head()];
-            }
 
             Either<BaseError, PlayoutItemResult> result = await mediator.Send(
                 new PrepareTroubleshootingPlayback(

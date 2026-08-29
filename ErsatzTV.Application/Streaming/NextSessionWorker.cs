@@ -1,5 +1,6 @@
 using System.IO.Abstractions;
 using CliWrap;
+using ErsatzTV.Application.Playouts;
 using ErsatzTV.Core;
 using ErsatzTV.Core.Domain;
 using ErsatzTV.Core.FFmpeg;
@@ -23,6 +24,8 @@ public class NextSessionWorker(
     ILogger<NextSessionWorker> logger)
     : IHlsSessionWorker
 {
+    private readonly TimeSpan _checkpointThreshold = TimeSpan.FromMinutes(5);
+
     private readonly SemaphoreSlim _slim = new(1, 1);
     private CancellationTokenSource _cancellationTokenSource;
     private IServiceScope _serviceScope = serviceScopeFactory.CreateScope();
@@ -30,6 +33,11 @@ public class NextSessionWorker(
     private string _channelNumber;
     private string _workingDirectory;
     private string _heartbeatFileName;
+    private DateTimeOffset _lastTouch;
+    private DateTimeOffset _lastCheckpoint;
+    private ChannelPlayoutMode _channelPlayoutMode = ChannelPlayoutMode.Continuous;
+
+    private IMediator Mediator => _serviceScope.ServiceProvider.GetRequiredService<IMediator>();
 
     void IDisposable.Dispose()
     {
@@ -84,6 +92,8 @@ public class NextSessionWorker(
 
     public void Touch(Option<string> fileName)
     {
+        _lastTouch = DateTimeOffset.Now;
+
         if (!fileSystem.File.Exists(_heartbeatFileName))
         {
             fileSystem.File.WriteAllBytes(_heartbeatFileName, []);
@@ -112,12 +122,42 @@ public class NextSessionWorker(
         CancellationToken incomingCancellationToken)
     {
         _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(incomingCancellationToken);
+        using var checkpointCts = CancellationTokenSource.CreateLinkedTokenSource(_cancellationTokenSource.Token);
+        Task checkpointLoop = Task.CompletedTask;
+
+        DateTimeOffset sessionStart = DateTimeOffset.Now;
+        _lastTouch = sessionStart;
+        _lastCheckpoint = _lastTouch;
 
         try
         {
             _channelNumber = channelNumber;
             _workingDirectory = fileSystem.Path.Combine(FileSystemLayout.TranscodeFolder, _channelNumber);
             _heartbeatFileName = fileSystem.Path.Combine(_workingDirectory, ".heartbeat");
+
+            Option<PlayoutModeViewModel> maybePlayout = await Mediator.Send(
+                new GetPlayoutModeByChannelNumber(_channelNumber),
+                _cancellationTokenSource.Token);
+
+            foreach (PlayoutModeViewModel playout in maybePlayout)
+            {
+                _channelPlayoutMode = playout.PlayoutMode;
+
+                if (_channelPlayoutMode is ChannelPlayoutMode.OnDemand)
+                {
+                    checkpointLoop = CheckpointLoop(checkpointCts.Token);
+
+                    await Mediator.Send(
+                        new TimeShiftOnDemandPlayout(playout.PlayoutId, sessionStart, true),
+                        _cancellationTokenSource.Token);
+
+                    // next reads serialized playout files rather than the database, so ensure it
+                    // sees the time-shifted items before starting the channel process
+                    await Mediator.Send(
+                        new SyncNextPlayout(_channelNumber),
+                        _cancellationTokenSource.Token);
+                }
+            }
 
             List<string> arguments = ["run", "--output-folder", _workingDirectory, "--number", channelNumber, "-"];
 
@@ -171,6 +211,25 @@ public class NextSessionWorker(
         }
         finally
         {
+            await checkpointCts.CancelAsync();
+            try
+            {
+                await checkpointLoop;
+            }
+            catch (OperationCanceledException)
+            {
+                // do nothing
+            }
+
+            try
+            {
+                await UpdateOnDemandCheckpoint(CancellationToken.None);
+            }
+            catch
+            {
+                // do nothing
+            }
+
             try
             {
                 localFileSystem.EmptyFolder(_workingDirectory);
@@ -234,5 +293,36 @@ public class NextSessionWorker(
         }
 
         return result;
+    }
+
+    private async Task CheckpointLoop(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(_checkpointThreshold);
+        while (await timer.WaitForNextTickAsync(cancellationToken))
+        {
+            try
+            {
+                if (_lastTouch > _lastCheckpoint)
+                {
+                    await UpdateOnDemandCheckpoint(cancellationToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to update on demand checkpoint for channel {Channel}", _channelNumber);
+            }
+        }
+    }
+
+    private async Task UpdateOnDemandCheckpoint(CancellationToken cancellationToken)
+    {
+        if (_channelPlayoutMode is ChannelPlayoutMode.OnDemand)
+        {
+            await Mediator.Send(
+                new UpdateOnDemandCheckpoint(_channelNumber, _lastTouch),
+                cancellationToken);
+        }
+
+        _lastCheckpoint = _lastTouch;
     }
 }

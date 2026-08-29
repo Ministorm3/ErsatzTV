@@ -3947,6 +3947,9 @@ namespace ErsatzTV.Infrastructure.Sqlite.Migrations
                     b.Property<DateTime?>("LastCollectionsScan")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("MissingSince")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Platform")
                         .HasColumnType("TEXT");
 

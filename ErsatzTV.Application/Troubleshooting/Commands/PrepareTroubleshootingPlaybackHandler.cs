@@ -259,6 +259,14 @@ public class PrepareTroubleshootingPlaybackHandler(
             }
         }
 
+        List<GraphicsElement> graphicsElements = [];
+        if (request.GraphicsElementIds.Count > 0)
+        {
+            graphicsElements = await dbContext.GraphicsElements
+                .Where(ge => request.GraphicsElementIds.Contains(ge.Id))
+                .ToListAsync(cancellationToken);
+        }
+
         switch (request.StreamingEngine)
         {
             case StreamingEngine.Next:
@@ -270,6 +278,7 @@ public class PrepareTroubleshootingPlaybackHandler(
                     inPoint,
                     outPoint,
                     watermarks,
+                    graphicsElements,
                     cancellationToken);
             default:
                 return await GetLegacyProcess(
@@ -283,6 +292,7 @@ public class PrepareTroubleshootingPlaybackHandler(
                     channel,
                     inPoint,
                     watermarks,
+                    graphicsElements,
                     cancellationToken);
         }
     }
@@ -295,6 +305,7 @@ public class PrepareTroubleshootingPlaybackHandler(
         TimeSpan inPoint,
         TimeSpan outPoint,
         List<WatermarkOptions> watermarks,
+        List<GraphicsElement> graphicsElements,
         CancellationToken cancellationToken)
     {
         Validation<BaseError, string> channelBinaryResult = await ChannelBinaryMustExist();
@@ -335,7 +346,7 @@ public class PrepareTroubleshootingPlaybackHandler(
             InPoint = inPoint,
             OutPoint = outPoint,
             ChapterTitle = null,
-            Watermarks = [],
+            Watermarks = [.. watermarks.Map(wm => wm.Watermark)],
             DisableWatermarks = request.WatermarkIds.Count == 0,
             PreferredAudioLanguageCode = null,
             PreferredAudioTitle = null,
@@ -345,14 +356,14 @@ public class PrepareTroubleshootingPlaybackHandler(
             CollectionKey = null,
             CollectionEtag = null,
             PlayoutItemWatermarks = [],
-            GraphicsElements = [],
-            PlayoutItemGraphicsElements = []
+            GraphicsElements = null,
+            PlayoutItemGraphicsElements = [.. graphicsElements.Map(ge => new PlayoutItemGraphicsElement { GraphicsElement = ge })]
         };
 
         Option<Core.Next.PlayoutItem> maybeNextPlayoutItem =
             await playoutItemConverter.ToNext(
                 Some(channel),
-                watermarks.HeadOrNone().Map(wm => wm.Watermark),
+                [],
                 TimeSpan.Zero,
                 playoutItem,
                 await GetSubtitles(mediaItem, request),
@@ -363,7 +374,7 @@ public class PrepareTroubleshootingPlaybackHandler(
         {
             var playout = new Core.Next.Playout
             {
-                Version = Core.Next.PlayoutSchemaVersion.For([nextPlayoutItem]),
+                Version = "https://ersatztv.org/playout/version/0.0.3",
                 Items = [nextPlayoutItem]
             };
 
@@ -412,6 +423,7 @@ public class PrepareTroubleshootingPlaybackHandler(
         Channel channel,
         TimeSpan inPoint,
         List<WatermarkOptions> watermarks,
+        List<GraphicsElement> graphicsElements,
         CancellationToken cancellationToken)
     {
         MediaVersion version = mediaItem.GetHeadVersion();
@@ -469,10 +481,6 @@ public class PrepareTroubleshootingPlaybackHandler(
 
         // we cannot burst live input
         bool hlsRealtime = mediaItem is RemoteStream { IsLive: true };
-
-        List<GraphicsElement> graphicsElements = await dbContext.GraphicsElements
-            .Where(ge => request.GraphicsElementIds.Contains(ge.Id))
-            .ToListAsync(cancellationToken);
 
         PlayoutItemResult playoutItemResult = await ffmpegProcessService.ForPlayoutItem(
             ffmpegPath,

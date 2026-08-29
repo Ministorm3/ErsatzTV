@@ -1,16 +1,66 @@
-# Changelog
+﻿# Changelog
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
+
+## [26.8.1] - 2026-08-29
+### Security
+- Fix GHSA-h3r4-r2f2-qf59 (CVE-PENDING)
+  - All users who link Plex or Emby media servers should upgrade as soon as possible
+  - **After upgrading, it is highly recommended to rotate your Plex token and Emby API key**
+    - To rotate Plex token:
+      - In **Media Sources** > **Plex** click **Re-authenticate with Plex** and complete the sign in to generate a new token
+      - Restart ErsatzTV so it picks up the new token immediately; connection details are cached for up to 30 minutes
+      - In https://app.plex.tv/ **Account Settings** > **Authorized Devices** delete the old ErsatzTV authorized device
+      - Restart the Plex server to immediately invalidate the token that the old authorized device used
+    - To rotate Emby API key:
+      - Generate new API key in Emby's **Dashboard** > **Advanced** > **API Keys**
+      - In **Media Sources** > **Emby** click **Edit Emby Connection**, paste the new API key and click **Save Changes**
+      - Delete the old API key in Emby's **API Keys** screen
+  - Jellyfin users are not affected and have no reason to rotate the API key
+- Fix case where specifically-crafted requests could access management UI over streaming port
+
+### Added
+- Add `Re-authenticate with Plex` button to the Plex media sources page
+  - Use this to replace the credentials ErsatzTV uses (after a Plex password reset, or after signing out of all Plex devices) without removing media sources or synchronized content
+  - This registers ErsatzTV with Plex as a new device, so Plex issues a new token; signing in again previously returned the same token
+  - To revoke the old token, remove the old `ErsatzTV` entry from `Authorized Devices` at plex.tv and restart your Plex server
+
+### Changed
+- **BREAKING CHANGE**: require `X-Etv-Api-Key` header for all API requests under `/api`
+  - The API key is automatically created at startup and can be found in the `api-secrets.json` file in the config folder
+  - Scripted schedule scripts are passed the API key in the `ETV_API_KEY` environment variable, and must send it in the `X-Etv-Api-Key` header on every call
+    - The key is not passed as a command line argument, so it does not appear in the process list or in logs
+    - Scripts that use the bundled docker entrypoint (`/app/scripted-schedules/entrypoint.py`) need no changes
+    - Hand-written scripts and generated clients must be updated; the API key security scheme is now included in the OpenAPI descriptions
+  - Troubleshooting playback endpoints are requested directly by the browser, so they authorize with the management UI session instead of the API key
+- Plex servers that are no longer listed at plex.tv are now flagged instead of deleted
+  - Previously, re-authenticating before re-claiming a server at app.plex.tv would delete that server along with its libraries and all of its media
+  - Flagged servers are skipped during scans, and are removed only when you choose to remove them
+
+### Fixed
+- Fix Plex page staying disabled until restart when a sign-in is not completed within two minutes, or when plex.tv cannot be reached
+- Fix Plex page showing no indication that ErsatzTV has been signed out of Plex
+- Fix mirror channels falling out of sync when using the next streaming engine
+
+## [26.8.0] - 2026-08-20
 ### Added
 - Add `Streaming Engine` dropdown to playback troubleshooter to support troubleshooting Next engine playback
+- Next engine
+  - Use `overlay_qsv` for hardware-accelerated watermarks and image subtitles
+  - Support multiple watermarks (still only `permanent` and `intermittent` modes, not `opacity expression`)
+  - Support image graphics elements that do not use an opacity expression
 
 ### Changed
 - Upgrade Mesa driver in docker from 25.2.8 to 26.0.3 to fix issues with hevc_vaapi encoder when using radeonsi driver
 
 ### Fixed
+- Bundle new ffmpeg 8.1.2 build on Windows that is patched to fix
+  - Vulkan/CUDA interop (libplacebo tonemapping)
+  - Unexpected slow performance with image subtitles
+- Enable Vulkan/CUDA interop (libplacebo tonemapping) in Docker, using Legacy and Next streaming engines
 - Fix regression from `v26.6.0` that caused external (sidecar) subtitles from Jellyfin and Emby to go missing
   - All Jellyfin external subtitles were deleted by hourly maintenance, so they were missing from **Troubleshooting** > **Playback** and were never burned in
   - Jellyfin and Emby items with multiple external subtitles would keep only one of them after a scan
@@ -19,6 +69,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - Affected channels would connect but never send any data
   - `MPEG-TS (Legacy)` and channel preview were not affected
   - Custom MPEG-TS scripts can now use the `ETV_CHANNEL_NAME`, `ETV_HLS_URL` and `ETV_FFMPEG_PATH` environment variables, which are not affected by this issue; the `{{ ChannelName }}`, `{{ HlsUrl }}` and `{{ FFmpegPath }}` template variables continue to work but remain affected
+- Next engine
+  - Fix audio dropout/desync when using QSV accel and loudness normalization with certain content
+  - Fix anamorphic content scaling (was incorrectly stretched with older builds)
+  - Fix on-demand channel progress (channels would not save checkpoints and would always start at the same spot)
 
 ## [26.7.1] - 2026-07-31
 ### Changed
@@ -3337,7 +3391,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Initial release to facilitate testing outside of Docker.
 
 
-[Unreleased]: https://github.com/ErsatzTV/legacy/compare/v26.7.1...HEAD
+[Unreleased]: https://github.com/ErsatzTV/legacy/compare/v26.8.1...HEAD
+[26.8.1]: https://github.com/ErsatzTV/legacy/compare/v26.8.0...v26.8.1
+[26.8.0]: https://github.com/ErsatzTV/legacy/compare/v26.7.1...v26.8.0
 [26.7.1]: https://github.com/ErsatzTV/legacy/compare/v26.7.0...v26.7.1
 [26.7.0]: https://github.com/ErsatzTV/legacy/compare/v26.6.0...v26.7.0
 [26.6.0]: https://github.com/ErsatzTV/legacy/compare/v26.5.1...v26.6.0

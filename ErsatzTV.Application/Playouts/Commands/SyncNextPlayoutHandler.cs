@@ -129,7 +129,12 @@ public partial class SyncNextPlayoutHandler(
             .ThenInclude(d => d.DecoGraphicsElements)
             .ThenInclude(d => d.GraphicsElement)
 
+            // get watermarks
             .Include(i => i.Watermarks)
+
+            // get graphics elements
+            .Include(i => i.PlayoutItemGraphicsElements)
+            .ThenInclude(pige => pige.GraphicsElement)
 
             // get playout templates (and deco templates/decos)
             .Include(i => i.Playout)
@@ -139,6 +144,15 @@ public partial class SyncNextPlayoutHandler(
             .ThenInclude(i => i.Deco)
             .ThenInclude(d => d.DecoWatermarks)
             .ThenInclude(d => d.Watermark)
+
+            // get playout templates (and deco templates/decos)
+            .Include(i => i.Playout)
+            .ThenInclude(p => p.Templates)
+            .ThenInclude(t => t.DecoTemplate)
+            .ThenInclude(t => t.Items)
+            .ThenInclude(i => i.Deco)
+            .ThenInclude(d => d.DecoGraphicsElements)
+            .ThenInclude(d => d.GraphicsElement)
 
             .Include(i => i.MediaItem)
             .ThenInclude(mi => mi.LibraryPath)
@@ -276,6 +290,8 @@ public partial class SyncNextPlayoutHandler(
             .AsNoTracking()
             .Include(c => c.Watermark)
             .Include(c => c.Artwork)
+            .Include(c => c.FFmpegProfile)
+            .ThenInclude(ff => ff.Resolution)
             .SingleOrDefaultAsync(c => c.Number == channelNumber, cancellationToken)
             .Map(Optional);
 
@@ -289,7 +305,7 @@ public partial class SyncNextPlayoutHandler(
                 targetFolder,
                 $"{first.StartOffset.ToUnixTimeMilliseconds()}_{last.FinishOffset.ToUnixTimeMilliseconds()}.json");
 
-            var playout = new Core.Next.Playout { Items = [] };
+            var playout = new Core.Next.Playout { Version = "https://ersatztv.org/playout/version/0.0.3", Items = [] };
             foreach (PlayoutItem playoutItem in group)
             {
                 Option<Core.Next.PlayoutItem> maybeNextPlayoutItem = await playoutItemConverter.ToNext(
@@ -307,9 +323,11 @@ public partial class SyncNextPlayoutHandler(
                 }
             }
 
-            // declared once the items are known, since what they carry is what a reader has to
-            // understand: a file with a slate in it must be refused by a worker that would drop it
-            playout.Version = Core.Next.PlayoutSchemaVersion.For(playout.Items);
+            // upstream declares 0.0.3 on every document, because 0.0.3 is also the version that
+            // introduced graphics layers. PlayoutSchemaVersion.For only inspects slate, so it
+            // would understate a document carrying graphics; the constant is the honest value
+            // until that helper learns the rest of what 0.0.3 covers.
+            playout.Version = "https://ersatztv.org/playout/version/0.0.3";
 
             await fileSystem.File.WriteAllTextAsync(fileName, Core.Next.Serialize.ToJson(playout), cancellationToken);
         }
