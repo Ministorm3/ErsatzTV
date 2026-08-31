@@ -1,6 +1,8 @@
+using ErsatzTV.Core.Next;
 using ErsatzTV.Middleware;
 using LanguageExt;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
 using Shouldly;
 
@@ -15,6 +17,24 @@ namespace ErsatzTV.Tests.Middleware;
 [TestFixture]
 public class NextCohortPlaylistMiddlewareTests
 {
+    [SetUp]
+    public void SetUp()
+    {
+        _folder = Path.Combine(Path.GetTempPath(), $"etv-cohort-middleware-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_folder);
+    }
+
+    [TearDown]
+    public void TearDown()
+    {
+        if (Directory.Exists(_folder))
+        {
+            Directory.Delete(_folder, true);
+        }
+    }
+
+    private string _folder;
+
     private static HttpRequest Request(string path, string queryString, string method = "GET")
     {
         var context = new DefaultHttpContext();
@@ -108,5 +128,77 @@ public class NextCohortPlaylistMiddlewareTests
     {
         NextCohortPlaylistMiddleware.Match(Request("/iptv/session/5/live.m3u8", "?zip=15216", "HEAD"))
             .IsSome.ShouldBeTrue();
+    }
+
+    [Test]
+    public async Task ShouldServeAFreshComposedPlaylist()
+    {
+        string answers = Path.Combine(_folder, "variants", ".answers");
+        Directory.CreateDirectory(answers);
+        await File.WriteAllTextAsync(
+            Path.Combine(answers, VariantRequests.StableName("zip=15216")),
+            "cafe1234");
+
+        const string Playlist = "#EXTM3U\nseg1.ts\nseg2.ts\nseg3.ts\nseg4.ts\n";
+        await File.WriteAllTextAsync(Path.Combine(_folder, "live.cafe1234.m3u8"), Playlist);
+
+        var context = new DefaultHttpContext();
+        context.Response.Body = new MemoryStream();
+        var request = new NextCohortPlaylistMiddleware.CohortPlaylistRequest("5", false, "zip=15216");
+
+        bool handled = await NextCohortPlaylistMiddleware.TryServeComposedPlaylist(
+            context,
+            request,
+            _folder,
+            NullLogger.Instance);
+
+        handled.ShouldBeTrue();
+        context.Response.ContentType.ShouldBe("application/vnd.apple.mpegurl");
+        context.Response.Body.Position = 0;
+        (await new StreamReader(context.Response.Body).ReadToEndAsync()).ShouldBe(Playlist);
+    }
+
+    [Test]
+    public async Task ShouldFallThroughWhenTheWorkerAnswersNoCohort()
+    {
+        string answers = Path.Combine(_folder, "variants", ".answers");
+        Directory.CreateDirectory(answers);
+        await File.WriteAllTextAsync(
+            Path.Combine(answers, VariantRequests.StableName("zip=15216")),
+            string.Empty);
+
+        var context = new DefaultHttpContext();
+        var request = new NextCohortPlaylistMiddleware.CohortPlaylistRequest("5", false, "zip=15216");
+
+        bool handled = await NextCohortPlaylistMiddleware.TryServeComposedPlaylist(
+            context,
+            request,
+            _folder,
+            NullLogger.Instance);
+
+        handled.ShouldBeFalse();
+    }
+
+    /// <summary>
+    ///     A viewer who hangs up cancels RequestAborted, and every await on the serve path
+    ///     carries that token. Before the catch in TryServeComposedPlaylist, the cancellation
+    ///     left the middleware as an unhandled exception and every hangup was logged as a 500.
+    /// </summary>
+    [Test]
+    public async Task ShouldAbandonTheRequestWhenTheViewerHangsUp()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var context = new DefaultHttpContext { RequestAborted = cancellation.Token };
+        var request = new NextCohortPlaylistMiddleware.CohortPlaylistRequest("5", false, "zip=15216");
+
+        bool handled = await NextCohortPlaylistMiddleware.TryServeComposedPlaylist(
+            context,
+            request,
+            _folder,
+            NullLogger.Instance);
+
+        handled.ShouldBeTrue();
     }
 }
