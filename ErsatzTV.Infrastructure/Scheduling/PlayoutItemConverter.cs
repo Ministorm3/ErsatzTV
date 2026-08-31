@@ -322,6 +322,34 @@ public class PlayoutItemConverter(
         int mediaSourceId = playoutItem.MediaItem.LibraryPath.Library.MediaSourceId;
         if (file is PlexMediaFile pmf)
         {
+            // the legacy media proxy only redirects to plex, and its localhost
+            // address is wrong for a next engine running in its own container;
+            // resolve the active plex connection here (as the proxy would) and
+            // let the next engine talk to plex directly, with the auth token
+            // supplied from its environment at play time
+            await using TvContext dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            PlexConnection connection = await dbContext.PlexMediaSources
+                .AsNoTracking()
+                .Where(s => s.Id == mediaSourceId)
+                .SelectMany(s => s.Connections)
+                .Where(c => c.IsActive)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (connection is not null)
+            {
+                string separator = pmf.Key.Contains('?') ? "&" : "?";
+                return new Core.Next.Source
+                {
+                    SourceType = Core.Next.SourceType.Http,
+                    Uri =
+                        $"{new Uri(new Uri(connection.Uri), pmf.Key)}{separator}X-Plex-Token={{{{ETV_PLEX_TOKEN_{mediaSourceId}}}}}",
+                    KeepAlive = false,
+                    Reconnect = true
+                };
+            }
+
+            // no active connection is known; fall back to the legacy proxy, whose
+            // url is signed so the internal media endpoint will serve it
             string sig = InternalUrlSigner.Sign(
                 exp,
                 "plex",
