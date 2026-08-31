@@ -93,7 +93,8 @@ public abstract class YamlPlayoutContentHandler(EnumeratorCache enumeratorCache)
             {
                 PlayoutId = context.Playout.Id,
                 PlaybackOrder = playbackOrder,
-                Index = playlistEnumerator.EnumeratorIndex,
+                Index = playlistEnumerator.State.Index,
+                Seed = playlistEnumerator.State.Seed,
                 When = playoutItem.StartOffset.UtcDateTime,
                 Finish = playoutItem.FinishOffset.UtcDateTime,
                 Key = historyKey,
@@ -115,6 +116,7 @@ public abstract class YamlPlayoutContentHandler(EnumeratorCache enumeratorCache)
                         PlayoutId = context.Playout.Id,
                         PlaybackOrder = playbackOrder,
                         Index = childEnumerator.State.Index,
+                        Seed = childEnumerator.State.Seed,
                         When = playoutItem.StartOffset.UtcDateTime,
                         Finish = playoutItem.FinishOffset.UtcDateTime,
                         Key = historyKey,

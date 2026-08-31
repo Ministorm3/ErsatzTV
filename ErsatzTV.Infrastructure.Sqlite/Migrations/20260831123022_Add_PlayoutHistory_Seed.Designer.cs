@@ -3,6 +3,7 @@ using System;
 using ErsatzTV.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ErsatzTV.Infrastructure.Sqlite.Migrations
 {
     [DbContext(typeof(TvContext))]
-    partial class TvContextModelSnapshot : ModelSnapshot
+    [Migration("20260831123022_Add_PlayoutHistory_Seed")]
+    partial class Add_PlayoutHistory_Seed
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.15");
@@ -2011,9 +2014,6 @@ namespace ErsatzTV.Infrastructure.Sqlite.Migrations
                     b.Property<string>("SchedulingContext")
                         .HasColumnType("TEXT");
 
-                    b.Property<int?>("SlateMediaItemId")
-                        .HasColumnType("INTEGER");
-
                     b.Property<DateTime>("Start")
                         .HasColumnType("TEXT");
 
@@ -2025,8 +2025,6 @@ namespace ErsatzTV.Infrastructure.Sqlite.Migrations
                     b.HasIndex("MediaItemId");
 
                     b.HasIndex("PlayoutId");
-
-                    b.HasIndex("SlateMediaItemId");
 
                     b.HasIndex("Start", "Finish")
                         .HasDatabaseName("IX_PlayoutItem_Start_Finish");
@@ -5104,16 +5102,9 @@ namespace ErsatzTV.Infrastructure.Sqlite.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("ErsatzTV.Core.Domain.MediaItem", "SlateMediaItem")
-                        .WithMany()
-                        .HasForeignKey("SlateMediaItemId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.Navigation("MediaItem");
 
                     b.Navigation("Playout");
-
-                    b.Navigation("SlateMediaItem");
                 });
 
             modelBuilder.Entity("ErsatzTV.Core.Domain.PlayoutItemGraphicsElement", b =>
