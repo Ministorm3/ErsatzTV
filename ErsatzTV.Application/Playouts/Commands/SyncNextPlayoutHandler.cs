@@ -323,12 +323,6 @@ public partial class SyncNextPlayoutHandler(
                 }
             }
 
-            // upstream declares 0.0.3 on every document, because 0.0.3 is also the version that
-            // introduced graphics layers. PlayoutSchemaVersion.For only inspects slate, so it
-            // would understate a document carrying graphics; the constant is the honest value
-            // until that helper learns the rest of what 0.0.3 covers.
-            playout.Version = "https://ersatztv.org/playout/version/0.0.3";
-
             await fileSystem.File.WriteAllTextAsync(fileName, Core.Next.Serialize.ToJson(playout), cancellationToken);
         }
     }
