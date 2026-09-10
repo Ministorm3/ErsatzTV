@@ -1448,13 +1448,10 @@ public class PlayoutBuilder : IPlayoutBuilder
                 }
 
                 // fall through to default case if we can't make the proper enumerator
+                _logger.LogWarning("Unable to build marathon enumerator; falling back to random");
                 goto default;
 
             default:
-                _logger.LogWarning(
-                    "Unsupported playback order {PlaybackOrder}; falling back to random",
-                    playbackOrder);
-
                 return new RandomizedMediaCollectionEnumerator(mediaItems, state);
         }
     }

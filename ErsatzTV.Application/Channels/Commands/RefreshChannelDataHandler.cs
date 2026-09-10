@@ -1194,20 +1194,17 @@ public class RefreshChannelDataHandler : IRequestHandler<RefreshChannelData>
             // must deserialize channel from json
             foreach (ExternalJsonChannel channel in maybeChannel)
             {
-                if (string.IsNullOrWhiteSpace(channel.StartTime))
+                if (!DateTimeOffset.TryParse(
+                        channel.StartTime,
+                        CultureInfo.InvariantCulture,
+                        DateTimeStyles.AssumeUniversal,
+                        out DateTimeOffset parsed))
                 {
-                    _logger.LogError(
-                        "External json channel in file {File} has no start time; unable to refresh channel data",
-                        path);
-
                     throw new InvalidOperationException(
-                        $"External json channel in file {path} has no start time");
+                        $"External json channel in file {path} has an invalid start time '{channel.StartTime}'");
                 }
 
-                DateTimeOffset startTime = DateTimeOffset.Parse(
-                    channel.StartTime,
-                    CultureInfo.InvariantCulture,
-                    DateTimeStyles.AssumeUniversal).ToLocalTime();
+                DateTimeOffset startTime = parsed.ToLocalTime();
 
                 for (var i = 0; i < channel.Programs.Length; i++)
                 {

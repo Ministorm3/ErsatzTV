@@ -93,20 +93,21 @@ public class ExternalJsonPlayoutItemProvider : IExternalJsonPlayoutItemProvider
         // must deserialize channel from json
         foreach (ExternalJsonChannel channel in maybeChannel)
         {
-            if (string.IsNullOrWhiteSpace(channel.StartTime))
+            if (!DateTimeOffset.TryParse(
+                    channel.StartTime,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal,
+                    out DateTimeOffset parsed))
             {
                 _logger.LogError(
-                    "External json channel in file {File} has no start time; unable to locate playout item",
-                    playout.ScheduleFile);
+                    "External json channel in file {ScheduleFile} has an invalid start time {StartTime}",
+                    playout.ScheduleFile,
+                    channel.StartTime);
 
-                throw new InvalidOperationException(
-                    $"External json channel in file {playout.ScheduleFile} has no start time");
+                return new UnableToLocatePlayoutItem();
             }
 
-            DateTimeOffset startTime = DateTimeOffset.Parse(
-                channel.StartTime,
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.AssumeUniversal).ToLocalTime();
+            DateTimeOffset startTime = parsed.ToLocalTime();
 
             //_logger.LogDebug("external json start time: {StartTime}", startTime);
 
