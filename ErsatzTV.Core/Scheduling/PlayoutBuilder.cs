@@ -185,67 +185,17 @@ public class PlayoutBuilder : IPlayoutBuilder
 
         // _logger.LogDebug("Remaining anchors: {@Anchors}", playout.ProgramScheduleAnchors);
 
-        var allAnchors = playout.ProgramScheduleAnchors.ToList();
-
-        var collectionIds = playout.ProgramScheduleAnchors.Map(a => Optional(a.CollectionId)).Somes().ToHashSet();
-
-        var multiCollectionIds =
-            playout.ProgramScheduleAnchors.Map(a => Optional(a.MultiCollectionId)).Somes().ToHashSet();
-
-        var smartCollectionIds =
-            playout.ProgramScheduleAnchors.Map(a => Optional(a.SmartCollectionId)).Somes().ToHashSet();
-
-        var searchQueries =
-            playout.ProgramScheduleAnchors.Map(a => Optional(a.SearchQuery)).Somes().ToHashSet();
-
-        var rerunCollectionIds =
-            playout.ProgramScheduleAnchors.Map(a => Optional(a.RerunCollectionId)).Somes().ToHashSet();
-
-        var mediaItemIds = playout.ProgramScheduleAnchors.Map(a => Optional(a.MediaItemId)).Somes().ToHashSet();
+        // only today's checkpoints are left, and at most one per collection key per local date is
+        // ever written, so this should already be one anchor per key; keep the oldest in case an
+        // older database has more. group on the whole key, anything left out is silently dropped,
+        // which is how playlist and fake-collection anchors used to lose their progress
+        List<PlayoutProgramScheduleAnchor> oldestAnchorPerKey = playout.ProgramScheduleAnchors
+            .GroupBy(CollectionKey.ForAnchor)
+            .Map(g => g.MinBy(a => a.AnchorDateOffset.IfNone(DateTimeOffset.MaxValue).Ticks))
+            .ToList();
 
         playout.ProgramScheduleAnchors.Clear();
-
-        foreach (int collectionId in collectionIds)
-        {
-            PlayoutProgramScheduleAnchor minAnchor = allAnchors.Filter(a => a.CollectionId == collectionId)
-                .MinBy(a => a.AnchorDateOffset.IfNone(DateTimeOffset.MaxValue).Ticks);
-            playout.ProgramScheduleAnchors.Add(minAnchor);
-        }
-
-        foreach (int multiCollectionId in multiCollectionIds)
-        {
-            PlayoutProgramScheduleAnchor minAnchor = allAnchors.Filter(a => a.MultiCollectionId == multiCollectionId)
-                .MinBy(a => a.AnchorDateOffset.IfNone(DateTimeOffset.MaxValue).Ticks);
-            playout.ProgramScheduleAnchors.Add(minAnchor);
-        }
-
-        foreach (int smartCollectionId in smartCollectionIds)
-        {
-            PlayoutProgramScheduleAnchor minAnchor = allAnchors.Filter(a => a.SmartCollectionId == smartCollectionId)
-                .MinBy(a => a.AnchorDateOffset.IfNone(DateTimeOffset.MaxValue).Ticks);
-            playout.ProgramScheduleAnchors.Add(minAnchor);
-        }
-
-        foreach (string searchQuery in searchQueries)
-        {
-            PlayoutProgramScheduleAnchor minAnchor = allAnchors.Filter(a => a.SearchQuery == searchQuery)
-                .MinBy(a => a.AnchorDateOffset.IfNone(DateTimeOffset.MaxValue).Ticks);
-            playout.ProgramScheduleAnchors.Add(minAnchor);
-        }
-
-        foreach (int rerunCollectionId in rerunCollectionIds)
-        {
-            PlayoutProgramScheduleAnchor minAnchor = allAnchors.Filter(a => a.RerunCollectionId == rerunCollectionId)
-                .MinBy(a => a.AnchorDateOffset.IfNone(DateTimeOffset.MaxValue).Ticks);
-            playout.ProgramScheduleAnchors.Add(minAnchor);
-        }
-
-        foreach (int mediaItemId in mediaItemIds)
-        {
-            PlayoutProgramScheduleAnchor minAnchor = allAnchors.Filter(a => a.MediaItemId == mediaItemId)
-                .MinBy(a => a.AnchorDateOffset.IfNone(DateTimeOffset.MaxValue).Ticks);
-            playout.ProgramScheduleAnchors.Add(minAnchor);
-        }
+        playout.ProgramScheduleAnchors.AddRange(oldestAnchorPerKey);
 
         // _logger.LogDebug("Oldest anchors for each collection: {@Anchors}", playout.ProgramScheduleAnchors);
 
@@ -257,9 +207,11 @@ public class PlayoutBuilder : IPlayoutBuilder
 
         // _logger.LogDebug("Final anchors: {@Anchors}", playout.ProgramScheduleAnchors);
 
+        // rewind to the start of today, so take the earliest rather than whichever comes first
         Option<DateTime> maybeAnchorDate = playout.ProgramScheduleAnchors
             .Map(a => Optional(a.AnchorDate))
             .Somes()
+            .OrderBy(d => d)
             .HeadOrNone();
 
         foreach (DateTime anchorDate in maybeAnchorDate)
@@ -1357,6 +1309,16 @@ public class PlayoutBuilder : IPlayoutBuilder
                     ? await _mediaCollectionRepository.GetPlaylistItemMap(DebugPlaylist, cancellationToken)
                     : await _mediaCollectionRepository.GetPlaylistItemMap(playlistId, cancellationToken);
 
+                // this reads the item map again, so the items that CheckForEmptyCollections removed are back
+                if (DebugPlaylist is null && mediaItems.Count > 0 && !mediaItems.Any(i => i is ChapterMediaItem))
+                {
+                    var allowedIds = mediaItems.Map(i => i.Id).ToHashSet();
+                    playlistItemMap = playlistItemMap
+                        .Map(kvp => (kvp.Key, Items: kvp.Value.Filter(i => allowedIds.Contains(i.Id)).ToList()))
+                        .Filter(x => x.Items.Count > 0)
+                        .ToDictionary(x => x.Key, x => x.Items);
+                }
+
                 return await PlaylistEnumerator.Create(
                     _mediaCollectionRepository,
                     playlistItemMap,
@@ -1418,6 +1380,7 @@ public class PlayoutBuilder : IPlayoutBuilder
                     await GetCollectionItemsForShuffleInOrder(
                         _mediaCollectionRepository,
                         collectionKey,
+                        mediaItems,
                         cancellationToken),
                     state,
                     activeSchedule.RandomStartPoint,
@@ -1496,6 +1459,27 @@ public class PlayoutBuilder : IPlayoutBuilder
         }
     }
 
+    // the callers read the collections again, so the items that CheckForEmptyCollections removed
+    // from the playout list come back
+    private static List<CollectionWithItems> RestrictToPlayoutItems(
+        List<CollectionWithItems> collections,
+        List<MediaItem> playoutItems)
+    {
+        // UseChaptersAsMediaItems gives the playout list new ids that no collection has.
+        // an empty list is a caller with no filter, not a filter that removes everything.
+        if (playoutItems.Count == 0 || playoutItems.Any(i => i is ChapterMediaItem))
+        {
+            return collections;
+        }
+
+        var allowedIds = playoutItems.Map(i => i.Id).ToHashSet();
+
+        return collections
+            .Map(c => c with { MediaItems = c.MediaItems.Filter(i => allowedIds.Contains(i.Id)).ToList() })
+            .Filter(c => c.MediaItems.Count > 0)
+            .ToList();
+    }
+
     internal static async Task<List<GroupedMediaItem>> GetGroupedMediaItemsForShuffle(
         IMediaCollectionRepository mediaCollectionRepository,
         ProgramSchedule activeSchedule,
@@ -1508,7 +1492,7 @@ public class PlayoutBuilder : IPlayoutBuilder
             List<CollectionWithItems> collections = await mediaCollectionRepository
                 .GetMultiCollectionCollections(collectionKey.MultiCollectionId.Value, cancellationToken);
 
-            return MultiCollectionGrouper.GroupMediaItems(collections);
+            return MultiCollectionGrouper.GroupMediaItems(RestrictToPlayoutItems(collections, mediaItems));
         }
 
         return activeSchedule.KeepMultiPartEpisodesTogether
@@ -1519,6 +1503,7 @@ public class PlayoutBuilder : IPlayoutBuilder
     internal static async Task<List<CollectionWithItems>> GetCollectionItemsForShuffleInOrder(
         IMediaCollectionRepository mediaCollectionRepository,
         CollectionKey collectionKey,
+        List<MediaItem> mediaItems,
         CancellationToken cancellationToken)
     {
         List<CollectionWithItems> result;
@@ -1537,7 +1522,7 @@ public class PlayoutBuilder : IPlayoutBuilder
                 cancellationToken);
         }
 
-        return result;
+        return RestrictToPlayoutItems(result, mediaItems);
     }
 
     internal static string DisplayTitle(MediaItem mediaItem)

@@ -42,7 +42,7 @@ public class PlexServerApiClient(PlexEtag plexEtag, ILogger<PlexServerApiClient>
     {
         try
         {
-            IPlexServerApi service = RestService.For<IPlexServerApi>(
+            IPlexServerApi service = RestService.ForGenerated<IPlexServerApi>(
                 new HttpClient
                 {
                     BaseAddress = new Uri(connection.Uri),
@@ -416,7 +416,7 @@ public class PlexServerApiClient(PlexEtag plexEtag, ILogger<PlexServerApiClient>
     {
         try
         {
-            IPlexServerApi service = RestService.For<IPlexServerApi>(
+            IPlexServerApi service = RestService.ForGenerated<IPlexServerApi>(
                 new HttpClient { BaseAddress = new Uri(connection.Uri) });
 
             PlexMediaContainerResponse<PlexMediaContainerHubContent<PlexHubResponse>> searchResponse =
@@ -466,7 +466,7 @@ public class PlexServerApiClient(PlexEtag plexEtag, ILogger<PlexServerApiClient>
 
         const int PAGE_SIZE = 10;
 
-        IPlexServerApi jsonService = RestService.For<IPlexServerApi>(connection.Uri);
+        IPlexServerApi jsonService = RestService.ForGenerated<IPlexServerApi>(connection.Uri);
         int pages = (size - 1) / PAGE_SIZE + 1;
 
         for (var i = 0; i < pages; i++)
@@ -490,7 +490,7 @@ public class PlexServerApiClient(PlexEtag plexEtag, ILogger<PlexServerApiClient>
 
         TimeSpan httpClientTimeout = timeout ?? TimeSpan.FromSeconds(30);
 
-        return RestService.For<IPlexServerApi>(
+        return RestService.ForGenerated<IPlexServerApi>(
             new HttpClient
             {
                 BaseAddress = new Uri(uri),
@@ -710,7 +710,12 @@ public class PlexServerApiClient(PlexEtag plexEtag, ILogger<PlexServerApiClient>
         foreach (PlexLabelResponse label in Optional(response.Label).Flatten())
         {
             metadata.Tags.Add(
-                new Tag { Name = label.Tag, ExternalCollectionId = label.Id.ToString(CultureInfo.InvariantCulture) });
+                new Tag
+                {
+                    Name = label.Tag,
+                    ExternalCollectionId = label.Id.ToString(CultureInfo.InvariantCulture),
+                    ExternalTypeId = Tag.PlexLabelTypeId
+                });
         }
 
         if (!string.IsNullOrWhiteSpace(response.Studio))
@@ -940,7 +945,12 @@ public class PlexServerApiClient(PlexEtag plexEtag, ILogger<PlexServerApiClient>
         foreach (PlexLabelResponse label in Optional(response.Label).Flatten())
         {
             metadata.Tags.Add(
-                new Tag { Name = label.Tag, ExternalCollectionId = label.Id.ToString(CultureInfo.InvariantCulture) });
+                new Tag
+                {
+                    Name = label.Tag,
+                    ExternalCollectionId = label.Id.ToString(CultureInfo.InvariantCulture),
+                    ExternalTypeId = Tag.PlexLabelTypeId
+                });
         }
 
         if (DateTime.TryParse(response.OriginallyAvailableAt, out DateTime releaseDate))
@@ -1344,7 +1354,12 @@ public class PlexServerApiClient(PlexEtag plexEtag, ILogger<PlexServerApiClient>
         foreach (PlexLabelResponse label in Optional(response.Label).Flatten())
         {
             metadata.Tags.Add(
-                new Tag { Name = label.Tag, ExternalCollectionId = label.Id.ToString(CultureInfo.InvariantCulture) });
+                new Tag
+                {
+                    Name = label.Tag,
+                    ExternalCollectionId = label.Id.ToString(CultureInfo.InvariantCulture),
+                    ExternalTypeId = Tag.PlexLabelTypeId
+                });
         }
 
         if (!string.IsNullOrWhiteSpace(response.Studio))

@@ -7,7 +7,6 @@ using ErsatzTV.Application.Graphics;
 using ErsatzTV.Application.Maintenance;
 using ErsatzTV.Core;
 using ErsatzTV.Core.Domain;
-using ErsatzTV.Core.Errors;
 using ErsatzTV.Core.FFmpeg;
 using ErsatzTV.Core.Interfaces.FFmpeg;
 using ErsatzTV.Core.Interfaces.Metadata;
@@ -16,7 +15,6 @@ using ErsatzTV.Core.Next.Config;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Subtitle = ErsatzTV.Core.Next.Config.Subtitle;
 
 namespace ErsatzTV.Application.Streaming;
 
@@ -25,6 +23,7 @@ public class StartFFmpegNextSessionHandler(
     IFileSystem fileSystem,
     ILocalFileSystem localFileSystem,
     IFFmpegSegmenterService ffmpegSegmenterService,
+    IChannelConfigConverter channelConfigConverter,
     IConfigElementRepository configElementRepository,
     IHostApplicationLifetime hostApplicationLifetime,
     IMediator mediator,
@@ -33,31 +32,69 @@ public class StartFFmpegNextSessionHandler(
     ILogger<NextSessionWorker> sessionWorkerLogger)
     : NextChannelHandlerBase(fileSystem), IRequestHandler<StartFFmpegNextSession, Either<BaseError, string>>
 {
+    private static readonly TimeSpan StartDeadline = TimeSpan.FromSeconds(30);
+
     private readonly IFileSystem _fileSystem = fileSystem;
 
-    public Task<Either<BaseError, string>> Handle(
+    public async Task<Either<BaseError, string>> Handle(
         StartFFmpegNextSession request,
-        CancellationToken cancellationToken) =>
-        Validate(request, cancellationToken)
-            .MapT(validationResult => StartProcess(request, validationResult, cancellationToken))
-            // this weirdness is needed to maintain the error type (.ToEitherAsync() just gives BaseError)
-#pragma warning disable VSTHRD103
-            .Bind(v => v.ToEither().MapLeft(seq => seq.Head()).MapAsync<BaseError, Task<string>, string>(identity));
-#pragma warning restore VSTHRD103
-
-    private async Task<string> StartProcess(
-        StartFFmpegNextSession request,
-        ValidationResult validationResult,
         CancellationToken cancellationToken)
     {
+        int initialSegmentCount = await configElementRepository
+            .GetValue<int>(ConfigElementKey.FFmpegInitialSegmentCount, cancellationToken)
+            .Map(maybeCount => maybeCount.Match(identity, () => 1));
+
+        Either<BaseError, Unit> ready = await SessionStartCoordinator.Start(
+            ffmpegSegmenterService,
+            request.ChannelNumber,
+            () => CreateWorker(request, cancellationToken),
+            initialSegmentCount,
+            StartDeadline,
+            cancellationToken);
+        return await ready.MapAsync(async _ => await GetMultiVariantPlaylist(request));
+    }
+
+    private async Task<Either<BaseError, IHlsSessionWorker>> CreateWorker(
+        StartFFmpegNextSession request,
+        CancellationToken cancellationToken)
+    {
+        Validation<BaseError, string> maybeChannelBinary = await ChannelBinaryMustExist();
+        if (maybeChannelBinary.IsFail)
+        {
+            return maybeChannelBinary.FailToSeq().Head();
+        }
+
+        string channelBinary = maybeChannelBinary.SuccessToSeq().Head();
+
         Option<TimeSpan> idleTimeout = Option<TimeSpan>.None;
 
         // Option<FrameRate> targetFramerate = await mediator.Send(
         //     new GetChannelFramerate(request.ChannelNumber),
         //     cancellationToken);
 
+        Option<ChannelViewModel> maybeChannel =
+            await mediator.Send(new GetChannelByNumber(request.ChannelNumber), cancellationToken);
+
+        if (maybeChannel.IsNone)
+        {
+            return BaseError.New($"Channel number {request.ChannelNumber} does not exist.");
+        }
+
+        ChannelViewModel channel = maybeChannel.Head();
+
+        Option<FFmpegProfileViewModel> maybeFFmpegProfile = await mediator.Send(
+            new GetFFmpegProfileById(channel.FFmpegProfileId),
+            cancellationToken);
+
+        if (maybeFFmpegProfile.IsNone)
+        {
+            return BaseError.New($"FFmpeg profile {channel.FFmpegProfileId} not exist");
+        }
+
+        FFmpegProfileViewModel ffmpegProfile = maybeFFmpegProfile.Head();
+
         // only load timeout when needed
-        if (validationResult.Channel.IdleBehavior is not ChannelIdleBehavior.KeepRunning)
+        if (channel.IdleBehavior is not ChannelIdleBehavior.KeepRunning)
         {
             idleTimeout = await configElementRepository
                 .GetValue<int>(ConfigElementKey.FFmpegSegmenterTimeout, cancellationToken)
@@ -66,111 +103,52 @@ public class StartFFmpegNextSessionHandler(
 
         await mediator.Send(new RefreshGraphicsElements(), cancellationToken);
 
-        ChannelConfig config = await MapConfig(
-            validationResult.Channel,
-            validationResult.FfmpegProfile,
-            cancellationToken);
+        PrepareTranscodeFolder(request.ChannelNumber);
+
+        ChannelConfig config = await channelConfigConverter.ToNext(channel, ffmpegProfile, cancellationToken);
 
         NextSessionWorker worker = new NextSessionWorker(
-            validationResult.ChannelBinary,
+            channelBinary,
             config,
             _fileSystem,
             localFileSystem,
             serviceScopeFactory,
             sessionWorkerLogger);
 
-        ffmpegSegmenterService.AddOrUpdateWorker(request.ChannelNumber, worker);
+        if (!ffmpegSegmenterService.TryAddWorker(request.ChannelNumber, worker))
+        {
+            ((IDisposable)worker).Dispose();
+            if (ffmpegSegmenterService.TryGetWorker(request.ChannelNumber, out IHlsSessionWorker existing))
+            {
+                return Right<BaseError, IHlsSessionWorker>(existing);
+            }
+
+            return new SessionEndedBeforeReady(request.ChannelNumber);
+        }
 
         // fire and forget worker
-        _ = worker.Run(request.ChannelNumber, idleTimeout, hostApplicationLifetime.ApplicationStopping)
-            .ContinueWith(
+        Task runTask = worker.Run(request.ChannelNumber, idleTimeout, hostApplicationLifetime.ApplicationStopping);
+        _ = runTask.ContinueWith(
                 _ =>
                 {
-                    ffmpegSegmenterService.RemoveWorker(request.ChannelNumber, out IHlsSessionWorker inactiveWorker);
+                    ffmpegSegmenterService.RemoveWorker(request.ChannelNumber, worker);
 
-                    inactiveWorker?.Dispose();
+                    ((IDisposable)worker).Dispose();
 
                     workerChannel.TryWrite(new ReleaseMemory(false));
                 },
                 TaskScheduler.Default);
 
-        int initialSegmentCount = await configElementRepository
-            .GetValue<int>(ConfigElementKey.FFmpegInitialSegmentCount, cancellationToken)
-            .Map(maybeCount => maybeCount.Match(identity, () => 1));
-
-        await worker.WaitForPlaylistSegments(initialSegmentCount, cancellationToken);
-
-        return await GetMultiVariantPlaylist(request);
+        return Right<BaseError, IHlsSessionWorker>(worker);
     }
 
-    private Task<Validation<BaseError, ValidationResult>> Validate(
-        StartFFmpegNextSession request,
-        CancellationToken cancellationToken) =>
-        SessionMustBeInactive(request)
-            .BindT(_ => FolderMustBeEmpty(request))
-            .BindT(_ => ChannelBinaryMustExist())
-            .BindT(channelBinary => ChannelMustExist(request, new ValidationResult(channelBinary, null, null), cancellationToken))
-            .BindT(result => FFmpegProfileMustExist(result, cancellationToken));
-
-    private async Task<Validation<BaseError, Unit>> SessionMustBeInactive(StartFFmpegNextSession request)
+    private void PrepareTranscodeFolder(string channelNumber)
     {
-        var result = Optional(ffmpegSegmenterService.TryAddWorker(request.ChannelNumber, null))
-            .Where(success => success)
-            .Map(_ => Unit.Default)
-            .ToValidation<BaseError>(new ChannelSessionAlreadyActive(await GetMultiVariantPlaylist(request)));
-
-        if (result.IsFail && ffmpegSegmenterService.TryGetWorker(
-                request.ChannelNumber,
-                out IHlsSessionWorker worker))
-        {
-            worker?.Touch(Option<string>.None);
-        }
-
-        return result;
-    }
-
-    private Task<Validation<BaseError, Unit>> FolderMustBeEmpty(StartFFmpegNextSession request)
-    {
-        string folder = Path.Combine(FileSystemLayout.TranscodeFolder, request.ChannelNumber);
+        string folder = Path.Combine(FileSystemLayout.TranscodeFolder, channelNumber);
         logger.LogDebug("Preparing transcode folder {Folder}", folder);
 
         localFileSystem.EnsureFolderExists(folder);
         localFileSystem.EmptyFolder(folder);
-
-        return Task.FromResult<Validation<BaseError, Unit>>(Unit.Default);
-    }
-
-    private async Task<Validation<BaseError, ValidationResult>> ChannelMustExist(
-        StartFFmpegNextSession request,
-        ValidationResult result,
-        CancellationToken cancellationToken)
-    {
-        Option<ChannelViewModel> maybeChannel = await mediator.Send(
-            new GetChannelByNumber(request.ChannelNumber),
-            cancellationToken);
-
-        foreach (ChannelViewModel channel in maybeChannel)
-        {
-            return result with { Channel = channel };
-        }
-
-        return BaseError.New($"Channel number {request.ChannelNumber} does not exist");
-    }
-
-    private async Task<Validation<BaseError, ValidationResult>> FFmpegProfileMustExist(
-        ValidationResult result,
-        CancellationToken cancellationToken)
-    {
-        Option<FFmpegProfileViewModel> maybeFFmpegProfile = await mediator.Send(
-            new GetFFmpegProfileById(result.Channel.FFmpegProfileId),
-            cancellationToken);
-
-        foreach (FFmpegProfileViewModel ffmpegProfile in maybeFFmpegProfile)
-        {
-            return result with { FfmpegProfile = ffmpegProfile };
-        }
-
-        return BaseError.New($"FFmpeg profile {result.Channel.FFmpegProfileId} not exist");
     }
 
     private async Task<string> GetMultiVariantPlaylist(StartFFmpegNextSession request)
@@ -224,159 +202,4 @@ public class StartFFmpegNextSessionHandler(
 #EXT-X-STREAM-INF:BANDWIDTH={bitrate}{resolution}
 {variantPlaylist}";
     }
-
-    private async Task<ChannelConfig> MapConfig(
-        ChannelViewModel channel,
-        FFmpegProfileViewModel ffmpegProfile,
-        CancellationToken cancellationToken)
-    {
-        var ffmpeg = new Ffmpeg
-        {
-            // next only keeps errors, so always pass the folder
-            ReportsFolder = FileSystemLayout.FFmpegReportsFolder
-        };
-
-        Option<string> ffmpegPath = await configElementRepository.GetValue<string>(
-            ConfigElementKey.FFmpegPath,
-            cancellationToken);
-
-        foreach (string path in ffmpegPath)
-        {
-            ffmpeg.FfmpegPath = path;
-        }
-
-        Option<string> ffprobePath = await configElementRepository.GetValue<string>(
-            ConfigElementKey.FFprobePath,
-            cancellationToken);
-
-        foreach (string path in ffprobePath)
-        {
-            ffmpeg.FfprobePath = path;
-        }
-
-        Option<bool> maybeSaveReports = await configElementRepository.GetValue<bool>(
-            ConfigElementKey.FFmpegSaveReports,
-            cancellationToken);
-
-        var audioNormalization = new Audio
-        {
-            Format = ffmpegProfile.AudioFormat switch
-            {
-                FFmpegProfileAudioFormat.Ac3 => AudioFormat.Ac3,
-                _ => AudioFormat.Aac
-            },
-            BitrateKbps = ffmpegProfile.AudioBitrate,
-            BufferKbps = ffmpegProfile.AudioBufferSize,
-            Channels = ffmpegProfile.AudioChannels,
-            SampleRateHz = ffmpegProfile.AudioSampleRate * 1000
-        };
-
-        if (ffmpegProfile.NormalizeLoudnessMode is NormalizeLoudnessMode.LoudNorm)
-        {
-            audioNormalization.NormalizeLoudness = true;
-            audioNormalization.Loudness = new LoudnessClass
-            {
-                IntegratedTarget = ffmpegProfile.TargetLoudness
-            };
-        }
-
-        string tonemapAlgorithm = ffmpegProfile.TonemapAlgorithm switch
-        {
-            FFmpegProfileTonemapAlgorithm.Clip => "clip",
-            FFmpegProfileTonemapAlgorithm.Gamma => "gamma",
-            FFmpegProfileTonemapAlgorithm.Reinhard => "reinhard",
-            FFmpegProfileTonemapAlgorithm.Mobius => "mobius",
-            FFmpegProfileTonemapAlgorithm.Hable => "hable",
-            _ => "linear"
-        };
-
-        var videoNormalization = new Video
-        {
-            Format = ffmpegProfile.VideoFormat switch
-            {
-                FFmpegProfileVideoFormat.Hevc => VideoFormat.Hevc,
-                _ => VideoFormat.H264
-            },
-            BitDepth = ffmpegProfile.BitDepth switch
-            {
-                FFmpegProfileBitDepth.TenBit => 10,
-                _ => 8
-            },
-            Accel = ffmpegProfile.HardwareAcceleration switch
-            {
-                HardwareAccelerationKind.Amf => AccelEnum.Amf,
-                HardwareAccelerationKind.Nvenc => AccelEnum.Cuda,
-                HardwareAccelerationKind.Qsv => AccelEnum.Qsv,
-                HardwareAccelerationKind.Rkmpp => AccelEnum.Rkmpp,
-                HardwareAccelerationKind.Vaapi => AccelEnum.Vaapi,
-                HardwareAccelerationKind.VideoToolbox => AccelEnum.Videotoolbox,
-                _ => null
-            },
-            Height = ffmpegProfile.Resolution.Height,
-            Width = ffmpegProfile.Resolution.Width,
-            BitrateKbps = ffmpegProfile.VideoBitrate,
-            BufferKbps = ffmpegProfile.VideoBufferSize,
-            ScalingMode = ffmpegProfile.ScalingBehavior switch
-            {
-                ScalingBehavior.Stretch => ScalingMode.Stretch,
-                ScalingBehavior.Crop => ScalingMode.Crop,
-                _ => ScalingMode.ScaleAndPad
-            },
-            Deinterlace = ffmpegProfile.DeinterlaceVideo,
-            Filters = new Filters
-            {
-                Tonemap = new TonemapClass
-                {
-                    Tonemap = tonemapAlgorithm
-                },
-                TonemapOpencl = new TonemapOpenclClass
-                {
-                    Tonemap = tonemapAlgorithm
-                },
-                Libplacebo = new LibplaceboClass
-                {
-                    Tonemapping = tonemapAlgorithm
-                }
-            },
-            VaapiDevice = ffmpegProfile.VaapiDevice,
-            VaapiDriver = ffmpegProfile.VaapiDriver switch
-            {
-                VaapiDriver.i965 => VaapiDriverEnum.I965,
-                VaapiDriver.RadeonSI => VaapiDriverEnum.Radeonsi,
-                _ => VaapiDriverEnum.Ihd
-            }
-        };
-
-        var subtitleNormalization = new Subtitle
-        {
-            Mode = channel.NextEngineTextSubtitleMode switch
-            {
-                NextEngineTextSubtitleMode.Convert => Mode.Convert,
-                _ => Mode.Burn
-            },
-            FontsFolder = FileSystemLayout.FontsCacheFolder
-        };
-
-        string playoutFolder = _fileSystem.Path.Combine(FileSystemLayout.NextPlayoutsFolder, channel.Number, "current");
-
-        return new ChannelConfig
-        {
-            Playout = new Core.Next.Config.Playout
-            {
-                Folder = playoutFolder
-            },
-            Ffmpeg = ffmpeg,
-            Normalization = new Normalization
-            {
-                Audio = audioNormalization,
-                Video = videoNormalization,
-                Subtitle = subtitleNormalization
-            }
-        };
-    }
-
-    private sealed record ValidationResult(
-        string ChannelBinary,
-        ChannelViewModel Channel,
-        FFmpegProfileViewModel FfmpegProfile);
 }

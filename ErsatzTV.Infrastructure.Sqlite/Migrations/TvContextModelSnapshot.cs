@@ -1325,10 +1325,16 @@ namespace ErsatzTV.Infrastructure.Sqlite.Migrations
                     b.Property<bool>("Default")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("DvProfile")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("FileName")
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("Forced")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("HasHdr10Metadata")
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("Index")
@@ -2941,6 +2947,9 @@ namespace ErsatzTV.Infrastructure.Sqlite.Migrations
                     b.Property<int>("PlayoutId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("Seed")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTime>("When")
                         .HasColumnType("TEXT");
 
@@ -3940,6 +3949,9 @@ namespace ErsatzTV.Infrastructure.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("LastCollectionsScan")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("MissingSince")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Platform")

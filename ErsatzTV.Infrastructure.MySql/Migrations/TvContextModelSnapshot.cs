@@ -1390,10 +1390,16 @@ namespace ErsatzTV.Infrastructure.MySql.Migrations
                     b.Property<bool>("Default")
                         .HasColumnType("tinyint(1)");
 
+                    b.Property<int?>("DvProfile")
+                        .HasColumnType("int");
+
                     b.Property<string>("FileName")
                         .HasColumnType("longtext");
 
                     b.Property<bool>("Forced")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool>("HasHdr10Metadata")
                         .HasColumnType("tinyint(1)");
 
                     b.Property<int>("Index")
@@ -3076,6 +3082,9 @@ namespace ErsatzTV.Infrastructure.MySql.Migrations
                     b.Property<int>("PlayoutId")
                         .HasColumnType("int");
 
+                    b.Property<int?>("Seed")
+                        .HasColumnType("int");
+
                     b.Property<DateTime>("When")
                         .HasColumnType("datetime(6)");
 
@@ -4113,6 +4122,9 @@ namespace ErsatzTV.Infrastructure.MySql.Migrations
                         .HasColumnType("longtext");
 
                     b.Property<DateTime?>("LastCollectionsScan")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime?>("MissingSince")
                         .HasColumnType("datetime(6)");
 
                     b.Property<string>("Platform")

@@ -171,6 +171,8 @@ public class MetadataRepository(IDbContextFactory<TvContext> dbContextFactory) :
                     existingStream.ColorSpace = incomingStream.ColorSpace;
                     existingStream.ColorTransfer = incomingStream.ColorTransfer;
                     existingStream.ColorPrimaries = incomingStream.ColorPrimaries;
+                    existingStream.DvProfile = incomingStream.DvProfile;
+                    existingStream.HasHdr10Metadata = incomingStream.HasHdr10Metadata;
                     existingStream.BitsPerRawSample = incomingStream.BitsPerRawSample;
                     existingStream.FileName = incomingStream.FileName;
                     existingStream.MimeType = incomingStream.MimeType;
@@ -530,10 +532,11 @@ public class MetadataRepository(IDbContextFactory<TvContext> dbContextFactory) :
     public async Task<bool> UpdateSubtitles(
         Core.Domain.Metadata metadata,
         List<Subtitle> subtitles,
+        SidecarSubtitleIdentity sidecarIdentity,
         CancellationToken cancellationToken)
     {
         await using TvContext dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        return await UpdateSubtitles(dbContext, metadata, subtitles, cancellationToken);
+        return await UpdateSubtitles(dbContext, metadata, subtitles, sidecarIdentity, cancellationToken);
     }
 
     public async Task<bool> UpdateChapters(
@@ -593,8 +596,12 @@ public class MetadataRepository(IDbContextFactory<TvContext> dbContextFactory) :
     {
         await using TvContext dbContext = await dbContextFactory.CreateDbContextAsync();
         return await dbContext.Connection.ExecuteAsync(
-                "DELETE FROM Tag WHERE Id = @TagId AND ((ExternalCollectionId = @ExternalCollectionId) OR (ExternalCollectionId IS NULL AND @ExternalCollectionId IS NULL))",
-                new { TagId = tag.Id, tag.ExternalCollectionId })
+                // the id alone finds the row; the 2 other columns make sure that a scanner
+                // does not delete a tag that a different scanner owns
+                @"DELETE FROM Tag WHERE Id = @TagId
+                  AND ((ExternalCollectionId = @ExternalCollectionId) OR (ExternalCollectionId IS NULL AND @ExternalCollectionId IS NULL))
+                  AND ((ExternalTypeId = @ExternalTypeId) OR (ExternalTypeId IS NULL AND @ExternalTypeId IS NULL))",
+                new { TagId = tag.Id, tag.ExternalCollectionId, tag.ExternalTypeId })
             .Map(result => result > 0);
     }
 
@@ -627,6 +634,7 @@ public class MetadataRepository(IDbContextFactory<TvContext> dbContextFactory) :
         TvContext dbContext,
         Core.Domain.Metadata metadata,
         List<Subtitle> subtitles,
+        SidecarSubtitleIdentity sidecarIdentity,
         CancellationToken cancellationToken)
     {
         // _logger.LogDebug(
@@ -675,7 +683,7 @@ public class MetadataRepository(IDbContextFactory<TvContext> dbContextFactory) :
                 existing,
                 incoming: subtitles.Filter(s => s.SubtitleKind is SubtitleKind.Sidecar),
                 SubtitleKind.Sidecar,
-                keyOf: s => $"file:{Path.GetFileName(s.Path)?.ToLowerInvariant()}",
+                keyOf: SidecarKey(sidecarIdentity),
                 applyUpdate: ApplySidecarUpdate,
                 dbContext);
 
@@ -775,6 +783,15 @@ public class MetadataRepository(IDbContextFactory<TvContext> dbContextFactory) :
         existingSubtitle.DateUpdated = incomingSubtitle.DateUpdated;
         existingSubtitle.Title = incomingSubtitle.Title;
     }
+
+    // media servers give us a stream index but often no usable path (jellyfin sends none at all, emby sends the
+    // same media source id for every stream), so keying those on file name collapses them all into one subtitle
+    private static Func<Subtitle, string> SidecarKey(SidecarSubtitleIdentity identity) =>
+        identity switch
+        {
+            SidecarSubtitleIdentity.StreamIndex => s => $"idx:{s.StreamIndex}",
+            _ => s => $"file:{Path.GetFileName(s.Path)?.ToLowerInvariant()}"
+        };
 
     private static void ApplySidecarUpdate(Subtitle existingSubtitle, Subtitle incomingSubtitle)
     {

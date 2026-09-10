@@ -355,6 +355,20 @@ public class PlexTelevisionRepository : IPlexTelevisionRepository
         foreach (PlexEpisode plexEpisode in maybeExisting)
         {
             var result = new MediaItemScanResult<PlexEpisode>(plexEpisode) { IsAdded = false };
+
+            // season id can change without etag changing
+            if (item.SeasonId != 0 && plexEpisode.SeasonId != item.SeasonId)
+            {
+                await dbContext.PlexEpisodes
+                    .Where(pe => pe.Id == plexEpisode.Id)
+                    .ExecuteUpdateAsync(
+                        setters => setters.SetProperty(ee => ee.SeasonId, item.SeasonId),
+                        cancellationToken);
+
+                result.Item.SeasonId = item.SeasonId;
+                result.IsUpdated = true;
+            }
+
             if (plexEpisode.Etag != item.Etag || deepScan)
             {
                 foreach (BaseError error in await UpdateEpisode(dbContext, plexEpisode, item, cancellationToken))
@@ -518,8 +532,9 @@ public class PlexTelevisionRepository : IPlexTelevisionRepository
         {
             List<int> tagIds = await dbContext.ShowMetadata
                 .Where(sm => result.Contains(sm.ShowId))
-                .Where(sm => sm.Tags.Any(t => t.Name == tag.Tag && t.ExternalTypeId == tagType))
-                .SelectMany(sm => sm.Tags.Select(t => t.Id))
+                .SelectMany(sm => sm.Tags
+                    .Where(t => t.Name == tag.Tag && t.ExternalTypeId == tagType)
+                    .Select(t => t.Id))
                 .ToListAsync(cancellationToken);
 
             // delete all tags
@@ -560,9 +575,15 @@ public class PlexTelevisionRepository : IPlexTelevisionRepository
         }
 
         int showId = await dbContext.PlexShows
+            .Where(s => s.LibraryPath.LibraryId == library.Id)
             .Where(s => s.Key == show.Key)
             .Select(s => s.Id)
             .FirstOrDefaultAsync(cancellationToken);
+
+        if (showId <= 0)
+        {
+            return new PlexShowAddTagResult(Option<int>.None, Option<int>.None);
+        }
 
         await dbContext.Connection.ExecuteAsync(
             new CommandDefinition(
